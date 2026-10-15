@@ -271,7 +271,7 @@ select{
 
 /* ---------- AI Sahayak (assistant) ---------- */
 .fab{
-  position:fixed; right:16px; bottom:calc(88px + env(safe-area-inset-bottom, 0px));
+  position:fixed; right:max(16px, calc(50% - 215px + 16px)); bottom:calc(88px + env(safe-area-inset-bottom, 0px));
   width:56px; height:56px; border-radius:50%; background:var(--paddy); color:#fff;
   font-size:25px; display:flex; align-items:center; justify-content:center;
   box-shadow:0 6px 18px rgba(0,0,0,.28); z-index:35;
@@ -837,7 +837,7 @@ function speak(text){
 
 function header(){
   $("brandBox").innerHTML = `किसान बजार<small>KISAN BAZAR · ${esc(BS_MONTHS[BS_NOW])} ${esc(N(BS_YEAR))}</small>`;
-  $("langBtn").textContent = L==="ne" ? "English" : "नेपाली";
+  $("langBtn").textContent = L==="ne" ? "नेपाली" : "English";
   const authBtn = $("authBtn");
   if(authBtn){
     if(account.token){
@@ -1605,10 +1605,155 @@ function viewBoard(){
   </div>`;
 }
 
+/* ---------------- ADMIN (co-op staff) ---------------- */
+let adminCache = {data:null, at:0};
+
+async function fetchAdminOverview(){
+  // 60s cache so tab switches don't hammer the endpoint
+  if(adminCache.data && Date.now() - adminCache.at < 60000) return adminCache.data;
+  const res = await fetch(`${BACKEND.baseUrl}/v1/admin/overview`, {
+    headers: {"Authorization": `Bearer ${account.token}`}
+  });
+  if(!res.ok) throw new Error(res.status === 403 ? T("स्टाफ पहुँच आवश्यक छ","Staff access required") : `server ${res.status}`);
+  adminCache = {data: await res.json(), at: Date.now()};
+  return adminCache.data;
+}
+
+function viewAdminGuard(){
+  if(!BACKEND.enabled || !account.token){
+    return `<div class="stack"><div class="card" style="border-left:7px solid var(--tori)">
+      <div class="lbl">${esc(T("प्रशासक क्षेत्र","Admin area"))}</div>
+      <p style="font-size:15px;color:var(--ink-2)">${esc(T("पहिले लगइन गर्नुहोस् — त्यसपछि यो ट्याबमा फर्कनुहोस्।","Please log in first, then return to this tab."))}</p>
+      <button class="btn" id="gotoLoginBtn" style="margin-top:10px">${esc(T("लगइन गर्नुहोस्","Log in"))}</button>
+    </div></div>`;
+  }
+  if(!account.isStaff){
+    return `<div class="stack"><div class="card" style="border-left:7px solid var(--alert)">
+      <div class="lbl">${esc(T("प्रशासक क्षेत्र","Admin area"))}</div>
+      <p style="font-size:15px;color:var(--ink-2)">${esc(T("यो क्षेत्र सहकारीका कर्मचारीका लागि मात्र हो।","This area is for co-op staff only."))}</p>
+    </div></div>`;
+  }
+  return null;
+}
+
+function viewAdminOverview(){
+  const guard = viewAdminGuard();
+  if(guard) return guard;
+  const d = adminCache.data;
+  if(!d){
+    fetchAdminOverview().then(()=>render({skipScroll:true})).catch(e=>{ adminCache.err = e.message; render({skipScroll:true}); });
+    return `<div class="stack"><div class="card"><p>${esc(T("लोड हुँदैछ...","Loading..."))}</p></div></div>`;
+  }
+  if(adminCache.err){
+    return `<div class="stack"><div class="card" style="border-left:7px solid var(--alert)"><p>⚠️ ${esc(adminCache.err)}</p></div></div>`;
+  }
+  const c = d.counts || {};
+  return `<div class="stack">
+    <div class="kpi">
+      <div><b>${esc(T("किसान","Farmers"))}</b><i>${esc(N(c.farmers||0))}</i></div>
+      <div><b>${esc(T("लटहरू","Lots"))}</b><i>${esc(N(c.lots||0))}</i></div>
+    </div>
+    <div class="kpi">
+      <div><b>${esc(T("सूचीकृत के.जी.","Listed kg"))}</b><i>${esc(N(c.total_kg||0))}</i></div>
+      <div><b>${esc(T("पुल्ड के.जी.","Pooled kg"))}</b><i>${esc(N(c.pooled_kg||0))}</i></div>
+    </div>
+    <h2 class="sec">${esc(T("हालका लटहरू","Recent lots"))}</h2>
+    ${(d.lots||[]).slice(0,5).map(l=>`<div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b>${esc(l.crop_code)} · ${esc(N(l.pooled_kg))} ${esc(T("के.जी.","kg"))}</b>
+        <span class="pill">${esc(l.status)}</span>
+      </div>
+      <p style="font-size:13px;color:var(--ink-2);margin-top:4px">${esc(l.id)} · ${l.rate_per_kg ? "रू "+esc(N(l.rate_per_kg))+"/kg" : esc(T("भाउ तोकिएको छैन","not priced yet"))}</p>
+    </div>`).join("") || `<div class="card"><p>${esc(T("कुनै लट छैन","No lots yet"))}</p></div>`}
+  </div>`;
+}
+
+function viewAdminLots(){
+  const guard = viewAdminGuard();
+  if(guard) return guard;
+  const d = adminCache.data;
+  if(!d){
+    fetchAdminOverview().then(()=>render({skipScroll:true})).catch(e=>{ adminCache.err = e.message; render({skipScroll:true}); });
+    return `<div class="stack"><div class="card"><p>${esc(T("लोड हुँदैछ...","Loading..."))}</p></div></div>`;
+  }
+  const forming = (d.lots||[]).filter(l=>l.status==="forming");
+  const rest = (d.lots||[]).filter(l=>l.status!=="forming");
+  return `<div class="stack">
+    <h2 class="sec">${esc(T("पुष्टि गर्न बाँकी","Awaiting confirmation"))} (${forming.length})</h2>
+    ${forming.map(l=>`<div class="card" style="margin-bottom:10px;border-left:7px solid var(--tori)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <b>${esc(l.crop_code)} · ${esc(N(l.pooled_kg))} ${esc(T("के.जी.","kg"))}</b>
+        <span style="font-size:12px;color:var(--ink-3)">${esc(l.id)}</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="rate-${esc(l.id)}" inputmode="decimal" placeholder="${esc(T("रू/के.जी.","Rs/kg"))}" style="flex:1;padding:10px;border:1px solid var(--line);border-radius:9px;font-size:15px">
+        <button class="btn" data-confirm-lot="${esc(l.id)}" style="flex:0 0 auto">${esc(T("पुष्टि","Confirm"))}</button>
+      </div>
+    </div>`).join("") || `<div class="card"><p>${esc(T("सबै लट पुष्टि भइसके","All lots confirmed"))}</p></div>`}
+    <h2 class="sec">${esc(T("अन्य लटहरू","Other lots"))}</h2>
+    ${rest.slice(0,10).map(l=>`<div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between">
+        <b>${esc(l.crop_code)} · ${esc(N(l.pooled_kg))} ${esc(T("के.जी.","kg"))}</b>
+        <span class="pill">${esc(l.status)}</span>
+      </div>
+    </div>`).join("")}
+  </div>`;
+}
+
+function viewAdminFarmers(){
+  const guard = viewAdminGuard();
+  if(guard) return guard;
+  const d = adminCache.data;
+  if(!d){
+    fetchAdminOverview().then(()=>render({skipScroll:true})).catch(e=>{ adminCache.err = e.message; render({skipScroll:true}); });
+    return `<div class="stack"><div class="card"><p>${esc(T("लोड हुँदैछ...","Loading..."))}</p></div></div>`;
+  }
+  return `<div class="stack"><h2 class="sec">${esc(T("किसानहरू","Farmers"))} (${(d.farmers||[]).length})</h2>
+    <div class="card" style="overflow-x:auto"><table class="adminTable">
+      <tr><th>${esc(T("नाम","Name"))}</th><th>${esc(T("फोन","Phone"))}</th><th>${esc(T("भुक्तानी","Payout"))}</th></tr>
+      ${(d.farmers||[]).map(f=>`<tr><td>${esc(f.name)}${f.is_staff?' 🛡️':''}</td><td>${esc(f.phone)}</td><td>${esc(f.payout_method||"-")}</td></tr>`).join("")}
+    </table></div></div>`;
+}
+
+function viewAdminRates(){
+  const guard = viewAdminGuard();
+  if(guard) return guard;
+  const d = adminCache.data;
+  if(!d){
+    fetchAdminOverview().then(()=>render({skipScroll:true})).catch(e=>{ adminCache.err = e.message; render({skipScroll:true}); });
+    return `<div class="stack"><div class="card"><p>${esc(T("लोड हुँदैछ...","Loading..."))}</p></div></div>`;
+  }
+  return `<div class="stack"><h2 class="sec">${esc(T("बाली भाउ","Crop rates"))}</h2>
+    <div class="card" style="overflow-x:auto"><table class="adminTable">
+      <tr><th>${esc(T("बाली","Crop"))}</th><th>${esc(T("कोड","Code"))}</th></tr>
+      ${(d.crops||[]).map(c=>`<tr><td>${esc(T(c.name_ne, c.name_en))}</td><td>${esc(c.code)}</td></tr>`).join("")}
+    </table></div>
+    <div class="card" style="border-left:7px solid var(--line)"><p style="font-size:14px;color:var(--ink-2)">${esc(T("भाउ लट पुष्टि गर्दा तोकिन्छ — 'लट सूची' ट्याब हेर्नुहोस्।","Rates are set when confirming a lot — see the Lots tab."))}</p></div></div>`;
+}
+
+async function doConfirmLot(lotId){
+  const inp = document.getElementById("rate-"+lotId);
+  const rate = parseFloat(inp && inp.value);
+  if(!(rate > 0)){ toast(T("सही भाउ लेख्नुहोस्","Enter a valid rate")); return; }
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/lots/${encodeURIComponent(lotId)}/confirm`, {
+      method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${account.token}`},
+      body: JSON.stringify({rate_per_kg: rate})
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || `server ${res.status}`);
+    adminCache = {data:null, at:0}; // invalidate
+    toast(T("लट पुष्टि भयो","Lot confirmed"));
+    render({skipScroll:true});
+  }catch(e){ toast("⚠️ "+(e.message||"failed")); }
+}
+
 /* ---------------- router ---------------- */
 const VIEWS = {today:viewToday, sell:viewSell, advice:viewAdvice, mine:viewMine,
                 market:viewMarket, cart:viewCart, how:viewHow,
-                pool:viewPool, route:viewRoute, board:viewBoard};
+                pool:viewPool, route:viewRoute, board:viewBoard,
+                admin_overview:viewAdminOverview, admin_farmers:viewAdminFarmers,
+                admin_lots:viewAdminLots, admin_rates:viewAdminRates};
 
 function render(opts){
   opts = opts || {};
@@ -1630,6 +1775,13 @@ document.addEventListener("click", e=>{
   if(!t) return;
 
   if(t.id==="langBtn"){ L = L==="ne"?"en":"ne"; store.set("lang",L); render(); return; }
+  if(t.id==="authBtn"){
+    // Header login button: jump to the Mine tab where the login UI lives.
+    // (There is no separate modal; the Mine tab hosts phone/OTP login.)
+    S.role = "farmer"; S.tab = "mine"; render();
+    try{ const inp=$("phoneInput"); if(inp) inp.focus(); }catch(e){}
+    return;
+  }
   if(t.dataset.role){ S.role=t.dataset.role; S.tab=TABS[S.role][0][0]; render(); return; }
   if(t.dataset.tab){ S.tab=t.dataset.tab; render(); return; }
   if(t.dataset.speak!==undefined){ speak(t.dataset.speak); return; }
@@ -1674,6 +1826,8 @@ document.addEventListener("click", e=>{
     return;
   }
 
+  if(t.id==="gotoLoginBtn"){ S.role="farmer"; S.tab="mine"; render(); return; }
+  if(t.dataset.confirmLot){ doConfirmLot(t.dataset.confirmLot); return; }
   if(t.dataset.zone){ S.zone=t.dataset.zone; render(); return; }
   if(t.dataset.land){ S.land=t.dataset.land; render(); return; }
 

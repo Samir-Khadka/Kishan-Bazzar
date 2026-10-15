@@ -14,12 +14,25 @@ import app as app_module
 # Make sure the SQLite schema exists and demo data is seeded on first boot.
 # On Render's ephemeral disk this re-seeds on every fresh deploy, which is
 # exactly what we want for a public demo: every visitor gets a clean market.
-db.init_db()
-conn = db.get_db()
-coops = conn.execute("SELECT COUNT(*) AS n FROM cooperatives").fetchone()["n"]
-conn.close()
-if coops == 0:
-    import seed
-    seed.seed()
+#
+# A file lock guards against two gunicorn workers racing here at startup:
+# seed.seed() does init_db(fresh=True), which unlinks the DB file — without
+# the lock, worker B can query a half-recreated database and 500 every
+# request until the next deploy.
+import fcntl
+
+lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".seed.lock")
+with open(lock_path, "w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        db.init_db()
+        conn = db.get_db()
+        coops = conn.execute("SELECT COUNT(*) AS n FROM cooperatives").fetchone()["n"]
+        conn.close()
+        if coops == 0:
+            import seed
+            seed.seed()
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
 
 app = app_module.app
