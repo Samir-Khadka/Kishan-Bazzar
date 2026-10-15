@@ -1,0 +1,1786 @@
+<!DOCTYPE html>
+<html lang="ne">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--
+  Defense-in-depth CSP for anyone who self-hosts this file outside its
+  current sandboxed environment (which already enforces its own, stricter
+  policy). A meta-tag CSP is weaker than a server-sent header — it can't
+  restrict frame-ancestors, for instance, and offers no protection until
+  the HTML has already started parsing — so this is a floor, not a
+  substitute for header-based CSP at whatever serves this file in
+  production. 'unsafe-inline' on script-src is required because the app
+  ships as one inline script block by design (a single-file artifact);
+  tightening that would mean moving to an external script with a nonce
+  or hash, which is real extra engineering, not a one-line fix.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none';">
+<title>किसान बजार — Kisan Bazar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Mukta:wght@200;400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paddy:#17583C;
+  --paddy-deep:#0E3826;
+  --tori:#E9B008;
+  --tori-soft:#FBEDBE;
+  --soil:#7A4A24;
+  --alert:#BE3218;
+  --alert-soft:#FBE3DD;
+  --ink:#16211B;
+  --ink-2:#4A5851;
+  --ink-3:#7E8C85;
+  --paper:#EFF2EA;
+  --card:#FFFFFF;
+  --line:#D8DFD3;
+  --radius-lg:18px;
+  --radius-sm:9px;
+  --shell:430px;
+}
+:root:not([data-theme="light"]){}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ink:#E8EFE9; --ink-2:#A7B6AD; --ink-3:#7C8B82;
+    --paper:#10150F; --card:#1A211B; --line:#2C3830;
+    --tori-soft:#3A2F08; --alert-soft:#3A180F;
+    --paddy:#3E9D6E; --paddy-deep:#0B2A1C;
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#E8EFE9; --ink-2:#A7B6AD; --ink-3:#7C8B82;
+  --paper:#10150F; --card:#1A211B; --line:#2C3830;
+  --tori-soft:#3A2F08; --alert-soft:#3A180F;
+  --paddy:#3E9D6E; --paddy-deep:#0B2A1C;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:"Mukta",system-ui,"Segoe UI",sans-serif;
+  font-size:17px; line-height:1.5;
+  display:flex; justify-content:center;
+  min-height:100vh;
+}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-visible{
+  outline:3px solid var(--tori); outline-offset:2px; border-radius:4px;
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- shell ---------- */
+.shell{
+  width:100%; max-width:var(--shell); background:var(--paper);
+  min-height:100vh; display:flex; flex-direction:column; position:relative;
+  box-shadow:0 0 0 1px var(--line);
+}
+@media(min-width:900px){ .shell{min-height:100vh} }
+
+/* ---------- top bar ---------- */
+.top{
+  background:var(--paddy-deep); color:#F2F7F0; padding:14px 18px 0;
+  position:relative; overflow:hidden; flex:0 0 auto;
+}
+.top .terrace{position:absolute;inset:auto 0 -2px 0;height:26px;width:100%;opacity:.5}
+.top-row{display:flex;align-items:center;gap:10px;position:relative;z-index:1}
+.brand{font-weight:800;font-size:21px;letter-spacing:-.01em;line-height:1.15}
+.brand small{display:block;font-weight:200;font-size:12px;opacity:.7;letter-spacing:.06em}
+.top-actions{margin-left:auto;display:flex;gap:6px}
+.chipbtn{
+  border:1px solid rgba(255,255,255,.28); border-radius:99px;
+  padding:5px 11px; font-size:13px; font-weight:600; color:#F2F7F0;
+}
+.chipbtn[aria-pressed="true"]{background:var(--tori);border-color:var(--tori);color:#241C00}
+
+.roles{display:flex;gap:6px;position:relative;z-index:1;padding:12px 0 18px}
+.role{
+  flex:1; text-align:center; padding:7px 4px; border-radius:99px; font-size:14px;
+  font-weight:600; color:rgba(242,247,240,.72); border:1px solid rgba(255,255,255,.18);
+}
+.role[aria-selected="true"]{background:#F2F7F0;color:var(--paddy-deep);border-color:#F2F7F0}
+
+/* ---------- content ---------- */
+.main{flex:1 1 auto;padding:16px 16px 100px;overflow-x:hidden}
+.stack>*+*{margin-top:14px}
+
+h2.sec{font-size:15px;font-weight:600;color:var(--ink-2);margin:22px 0 10px}
+h2.sec:first-child{margin-top:4px}
+
+.card{
+  background:var(--card); border:1px solid var(--line);
+  border-radius:var(--radius-lg); padding:16px;
+}
+.card.flat{border-radius:var(--radius-sm)}
+
+/* ---------- weather band: the hero ---------- */
+.warn{
+  border-radius:var(--radius-lg); padding:18px 18px 16px;
+  background:var(--alert-soft); border-left:7px solid var(--alert);
+  position:relative;
+}
+.warn.ok{background:var(--tori-soft);border-left-color:var(--tori)}
+.warn.calm{background:var(--card);border-left-color:var(--paddy);border:1px solid var(--line);border-left:7px solid var(--paddy)}
+.warn-kicker{font-size:13px;font-weight:600;color:var(--alert);margin-bottom:4px}
+.warn.ok .warn-kicker{color:#8A6A00}
+.warn.calm .warn-kicker{color:var(--paddy)}
+.warn-line{font-size:23px;font-weight:800;line-height:1.28;letter-spacing:-.015em}
+.warn-sub{font-size:15px;color:var(--ink-2);margin-top:7px;max-width:44ch}
+.warn-src{font-size:12px;color:var(--ink-3);margin-top:10px}
+.speak{
+  margin-top:12px;display:inline-flex;align-items:center;gap:7px;
+  background:var(--ink);color:var(--paper);border-radius:99px;padding:8px 15px;
+  font-size:14px;font-weight:600;
+}
+
+/* ---------- forecast strip ---------- */
+.fc{display:flex;gap:7px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+.fc::-webkit-scrollbar{height:0}
+.fcd{
+  flex:0 0 76px;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:9px 6px;text-align:center;
+}
+.fcd b{display:block;font-size:13px;font-weight:600;color:var(--ink-2)}
+.fcd .ic{font-size:24px;line-height:1.4}
+.fcd .t{font-size:15px;font-weight:800}
+.fcd .r{font-size:12px;color:var(--ink-3)}
+.fcd.wet{background:var(--alert-soft);border-color:#E8BDB1}
+
+/* ---------- price rows ---------- */
+.prices{border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;background:var(--card)}
+.prow{display:flex;align-items:center;gap:12px;padding:12px 15px;border-bottom:1px solid var(--line)}
+.prow:last-child{border-bottom:0}
+.prow .em{font-size:23px;width:28px;text-align:center}
+.prow .nm{flex:1;min-width:0}
+.prow .nm b{font-weight:600;font-size:16px;display:block}
+.prow .nm span{font-size:12.5px;color:var(--ink-3)}
+.prow .pr{text-align:right;white-space:nowrap}
+.prow .pr b{font-size:20px;font-weight:800;font-feature-settings:"tnum"}
+.prow .pr span{display:block;font-size:12px;font-weight:600}
+.up{color:var(--paddy)} .down{color:var(--alert)} .flat0{color:var(--ink-3)}
+
+/* ---------- generic ---------- */
+.lbl{font-size:13.5px;font-weight:600;color:var(--ink-2);display:block;margin-bottom:7px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.grid.c3{grid-template-columns:repeat(3,1fr)}
+.grid.c2{grid-template-columns:repeat(2,1fr)}
+.pick{
+  background:var(--card);border:1.5px solid var(--line);border-radius:var(--radius-sm);
+  padding:11px 5px;text-align:center;font-size:13px;font-weight:600;line-height:1.3;
+}
+.pick .ic{display:block;font-size:26px;line-height:1.25}
+.pick[aria-pressed="true"]{border-color:var(--paddy);background:color-mix(in srgb,var(--paddy) 10%,transparent)}
+.btn{
+  display:block;width:100%;text-align:center;background:var(--paddy);color:#fff;
+  border-radius:var(--radius-sm);padding:15px;font-size:17px;font-weight:800;
+}
+.btn:disabled{opacity:.42;cursor:not-allowed}
+.btn.ghost{background:transparent;color:var(--paddy);border:1.5px solid var(--paddy)}
+.btn.tori{background:var(--tori);color:#241C00}
+.num{
+  display:flex;align-items:center;gap:0;border:1.5px solid var(--line);
+  border-radius:var(--radius-sm);overflow:hidden;background:var(--card);
+}
+.num button{flex:0 0 58px;padding:14px 0;font-size:24px;font-weight:800;color:var(--paddy)}
+.num input{
+  flex:1;border:0;text-align:center;font:800 24px "Mukta",sans-serif;
+  background:transparent;color:var(--ink);min-width:0;padding:12px 0;
+}
+select{
+  width:100%;padding:13px 12px;border:1.5px solid var(--line);border-radius:var(--radius-sm);
+  background:var(--card);color:var(--ink);font:600 16px "Mukta",sans-serif;
+}
+
+/* ---------- advisory result ---------- */
+.rec{border:1px solid var(--line);border-left:7px solid var(--paddy);border-radius:var(--radius-lg);background:var(--card);padding:15px;position:relative}
+.rec.b{border-left-color:var(--tori)} .rec.c{border-left-color:var(--soil)}
+.rec h3{font-size:19px;font-weight:800;display:flex;align-items:center;gap:9px}
+.rec h3 span{font-size:26px}
+.rec .why{font-size:15px;color:var(--ink-2);margin:7px 0 11px;max-width:46ch}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden}
+.facts div{background:var(--card);padding:9px 11px}
+.facts b{display:block;font-size:12px;font-weight:600;color:var(--ink-3)}
+.facts i{font-style:normal;font-size:15px;font-weight:600}
+.note{font-size:13.5px;color:var(--soil);margin-top:10px;display:flex;gap:7px}
+
+/* ---------- offers / lots ---------- */
+.item{display:flex;gap:12px;align-items:flex-start;padding:13px 15px;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:0}
+.item .em{font-size:27px}
+.item .bd{flex:1;min-width:0}
+.item .bd b{font-size:16.5px;font-weight:600}
+.item .bd p{font-size:13.5px;color:var(--ink-2);margin-top:2px}
+.tag{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:99px;margin-top:6px}
+.t-wait{background:var(--tori-soft);color:#8A6A00}
+.t-ok{background:color-mix(in srgb,var(--paddy) 15%,transparent);color:var(--paddy)}
+.t-paid{background:var(--ink);color:var(--paper)}
+.money{font-weight:800;font-size:17px;white-space:nowrap;font-feature-settings:"tnum"}
+
+.empty{text-align:center;padding:38px 20px;color:var(--ink-2)}
+.empty .ic{font-size:42px;display:block;margin-bottom:10px}
+.empty b{display:block;font-size:17px;margin-bottom:5px;color:var(--ink)}
+
+.kpi{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kpi div{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-sm);padding:13px}
+.kpi b{display:block;font-size:12.5px;color:var(--ink-3);font-weight:600}
+.kpi i{font-style:normal;font-size:25px;font-weight:800;font-feature-settings:"tnum"}
+
+/* ---------- bottom nav ---------- */
+.nav{
+  position:fixed;bottom:0;width:100%;max-width:var(--shell);background:var(--card);
+  border-top:1px solid var(--line);display:flex;padding:7px 4px calc(7px + env(safe-area-inset-bottom));
+  z-index:20;
+}
+.nav button{flex:1;text-align:center;padding:5px 2px;color:var(--ink-3);font-size:11.5px;font-weight:600;line-height:1.3}
+.nav button .ic{display:block;font-size:23px;line-height:1.3}
+.nav button[aria-current="page"]{color:var(--paddy)}
+
+/* ---------- toast ---------- */
+.toast{
+  position:fixed;bottom:88px;left:50%;transform:translateX(-50%) translateY(14px);
+  background:var(--ink);color:var(--paper);padding:13px 20px;border-radius:99px;
+  font-weight:600;font-size:15px;opacity:0;pointer-events:none;transition:.22s;z-index:40;
+  max-width:92%;text-align:center;
+}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.demo{font-size:12px;color:var(--ink-3);text-align:center;padding:18px 10px 4px;line-height:1.5}
+.divider{height:1px;background:var(--line);margin:18px 0}
+.sms{background:var(--ink);color:var(--paper);border-radius:var(--radius-sm);padding:13px 15px;font-size:14px;line-height:1.55}
+.sms b{display:block;font-size:12px;opacity:.6;font-weight:600;margin-bottom:5px}
+
+/* ---------- land scan ---------- */
+.modeToggle{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:99px;padding:4px}
+.modeToggle button{flex:1;text-align:center;padding:9px 4px;border-radius:99px;font-size:14px;font-weight:600;color:var(--ink-2)}
+.modeToggle button[aria-pressed="true"]{background:var(--paddy);color:#fff}
+.scanBox{border:2px dashed var(--line);border-radius:var(--radius-lg);padding:22px 16px;text-align:center;background:var(--card)}
+.scanBox .ic{font-size:38px;display:block;margin-bottom:8px}
+.camBtn{display:inline-flex;align-items:center;gap:8px;background:var(--paddy);color:#fff;border-radius:99px;padding:11px 20px;font-size:15px;font-weight:700;margin-top:10px}
+.photoPreview{width:100%;max-height:220px;object-fit:cover;border-radius:var(--radius-sm);display:block;margin-bottom:12px}
+.qopt{display:block;width:100%;text-align:left;background:var(--card);border:1.5px solid var(--line);border-radius:var(--radius-sm);padding:13px 15px;font-size:15px;font-weight:600;margin-bottom:8px}
+.qopt[aria-pressed="true"]{border-color:var(--paddy);background:color-mix(in srgb,var(--paddy) 10%,transparent)}
+.confBadge{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:700;padding:4px 11px;border-radius:99px}
+.confGood{background:color-mix(in srgb,var(--paddy) 15%,transparent);color:var(--paddy)}
+.confOk{background:var(--tori-soft);color:#8A6A00}
+.swatch{display:inline-block;width:15px;height:15px;border-radius:4px;vertical-align:-2px;margin-right:5px;border:1px solid rgba(0,0,0,.15)}
+.scanDisclaimer{font-size:13px;color:var(--soil);background:color-mix(in srgb,var(--soil) 8%,transparent);border-radius:var(--radius-sm);padding:10px 13px;margin-top:10px;line-height:1.5}
+.stepdots{display:flex;gap:6px;justify-content:center;margin-bottom:14px}
+.stepdots span{width:7px;height:7px;border-radius:50%;background:var(--line)}
+.stepdots span[aria-current="true"]{background:var(--paddy);width:20px;border-radius:99px}
+
+/* ---------- AI Sahayak (assistant) ---------- */
+.fab{
+  position:fixed; right:16px; bottom:calc(88px + env(safe-area-inset-bottom, 0px));
+  width:56px; height:56px; border-radius:50%; background:var(--paddy); color:#fff;
+  font-size:25px; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 6px 18px rgba(0,0,0,.28); z-index:35;
+}
+.fabBadge{
+  position:absolute; top:-1px; right:-1px; width:14px; height:14px; border-radius:50%;
+  background:var(--alert); border:2px solid var(--paper);
+}
+@keyframes chatIn{from{opacity:0; transform:translateY(14px)} to{opacity:1; transform:translateY(0)}}
+.chatPanel{
+  position:fixed; left:16px; right:16px; margin:0 auto; max-width:calc(var(--shell) - 32px);
+  bottom:calc(158px + env(safe-area-inset-bottom, 0px)); max-height:58vh;
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius-lg);
+  box-shadow:0 14px 34px rgba(0,0,0,.3); display:flex; flex-direction:column; overflow:hidden;
+  z-index:36; animation:chatIn .18s ease-out;
+}
+.chatHeader{
+  display:flex; align-items:center; justify-content:space-between; padding:12px 15px;
+  background:var(--paddy-deep); color:#F2F7F0; font-weight:700; font-size:15px; flex:0 0 auto;
+}
+.chatHeader button{color:#F2F7F0; font-size:17px; padding:2px 8px}
+.chatMsgs{flex:1 1 auto; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; min-height:140px}
+.chatRow{display:flex}
+.chatRow.user{justify-content:flex-end}
+.botBubble{background:var(--paper); border:1px solid var(--line); border-radius:14px 14px 14px 4px; padding:10px 13px; max-width:85%; font-size:14.5px; line-height:1.5}
+.userBubble{background:var(--paddy); color:#fff; border-radius:14px 14px 4px 14px; padding:10px 13px; max-width:85%; font-size:14.5px; line-height:1.5}
+.chatChips{display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 2px 2px}
+.chip{background:var(--card); border:1.3px solid var(--paddy); color:var(--paddy); border-radius:99px; padding:7px 13px; font-size:12.5px; font-weight:700}
+.chatInputRow{display:flex; gap:8px; padding:10px; border-top:1px solid var(--line); background:var(--card); flex:0 0 auto}
+#chatInput{flex:1; border:1.5px solid var(--line); border-radius:99px; padding:10px 15px; font:600 14.5px "Mukta",sans-serif; background:var(--paper); color:var(--ink); min-width:0}
+#chatSend{background:var(--paddy); color:#fff; width:40px; height:40px; border-radius:50%; font-size:16px; flex:0 0 40px}
+
+/* ---------- Auth Modal & Admin Dashboard ---------- */
+.modalOverlay{
+  position:fixed; inset:0; background:rgba(0,0,0,.65); backdrop-filter:blur(4px);
+  display:flex; align-items:center; justify-content:center; z-index:90; padding:16px;
+  animation:fadeIn .15s ease-out;
+}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.modalCard{
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius-lg);
+  box-shadow:0 20px 40px rgba(0,0,0,.35); width:100%; max-width:440px; max-height:90vh;
+  overflow-y:auto; padding:20px; animation:chatIn .18s ease-out;
+}
+.modalClose{background:transparent; border:0; font-size:20px; font-weight:700; color:var(--ink-2); cursor:pointer; padding:4px 8px}
+.authTabs{display:flex; gap:6px; background:var(--paper); border:1px solid var(--line); border-radius:99px; padding:3px}
+.authTab{flex:1; padding:8px 12px; border-radius:99px; font-weight:700; font-size:13.5px; text-align:center; color:var(--ink-2); background:transparent; border:0; cursor:pointer}
+.authTab.active{background:var(--paddy); color:#fff}
+.demoPills{display:flex; flex-direction:column; gap:6px}
+.demoPill{display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-sm); padding:8px 12px; font-size:13px; cursor:pointer}
+.demoPill:hover{border-color:var(--paddy); background:color-mix(in srgb,var(--paddy) 8%,transparent)}
+.formInput, .formSelect{width:100%; border:1.5px solid var(--line); border-radius:var(--radius-sm); padding:10px 12px; font:600 14px "Mukta",sans-serif; background:var(--paper); color:var(--ink)}
+.formInput:focus, .formSelect:focus{border-color:var(--paddy); outline:none}
+.kpiGrid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px}
+.kpiCard{background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md); padding:14px 12px; text-align:center}
+.kpiIcon{font-size:24px; margin-bottom:4px}
+.kpiVal{font-size:20px; font-weight:800}
+.kpiLbl{font-size:12px; color:var(--ink-2); font-weight:600; margin-top:2px}
+.adminTable{width:100%; border-collapse:collapse; font-size:13px}
+.adminTable th{background:var(--paper); text-align:left; padding:10px 12px; font-weight:700; color:var(--ink-2); border-bottom:1px solid var(--line)}
+.adminTable td{padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="top">
+    <svg class="terrace" viewBox="0 0 430 26" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 26 L0 18 Q70 10 140 16 T280 12 T430 19 L430 26 Z" fill="#EFF2EA" opacity=".18"/>
+      <path d="M0 26 L0 23 Q80 16 160 21 T310 18 T430 24 L430 26 Z" fill="#EFF2EA" opacity=".3"/>
+    </svg>
+    <div class="top-row">
+      <div class="brand" id="brandBox"></div>
+      <div class="top-actions" style="display:flex;gap:6px;align-items:center">
+        <button class="chipbtn" id="authBtn" style="font-weight:700">👤 लगइन</button>
+        <button class="chipbtn" id="langBtn" aria-pressed="true">नेपाली</button>
+      </div>
+    </div>
+    <div class="roles" role="tablist" id="roles"></div>
+  </header>
+
+  <main class="main" id="main"></main>
+
+  <nav class="nav" id="nav"></nav>
+  <div id="sahayakRoot"></div>
+  <div id="authModalRoot"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <canvas id="scanCanvas" width="40" height="40" style="display:none" aria-hidden="true"></canvas>
+  <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">
+</div>
+
+<script>
+"use strict";
+/* ===================================================================
+   किसान बजार — farmer-first prototype
+   Data below is illustrative demo data modelled on Nepali conditions.
+   In production: DHM bulletins, Kalimati rates, NARC/DoA crop calendars.
+   =================================================================== */
+
+/* ---------- persistence (per-viewer only, may be unavailable) ---------- */
+const store = {
+  get(k, fb){ try{ const v = localStorage.getItem("kb:"+k); return v ? JSON.parse(v) : fb; }catch(e){ return fb; } },
+  set(k, v){ try{ localStorage.setItem("kb:"+k, JSON.stringify(v)); }catch(e){} }
+};
+
+/* ---------- i18n ---------- */
+let L = store.get("lang","ne");
+const T = (ne,en)=> L==="ne" ? ne : en;
+
+/* ---------- state ---------- */
+const S = {
+  role: store.get("role","farmer"),
+  tab: store.get("tab","today"),
+  zone: store.get("zone","midhill"),
+  land: store.get("land","bari"),
+  offers: store.get("offers", [
+    {id:1, crop:"cauliflower", kg:40, grade:"A", status:"lot", lot:"KVR-118", rate:52, day:"आज"},
+    {id:2, crop:"tomato",      kg:25, grade:"B", status:"paid", lot:"KVR-114", rate:41, day:"गत हप्ता"}
+  ]),
+  cart: store.get("cart", {})
+};
+const save = ()=>{ store.set("role",S.role); store.set("tab",S.tab); store.set("zone",S.zone);
+                   store.set("land",S.land); store.set("offers",S.offers); store.set("cart",S.cart); };
+
+/* ---------- Nepali numerals ---------- */
+const DEV = "०१२३४५६७८९";
+const N = n => L==="ne" ? String(n).replace(/\d/g, d=>DEV[+d]) : String(n);
+const money = n => (L==="ne" ? "रु " : "Rs ") + N(Math.round(n).toLocaleString("en-IN"));
+
+/* ---------- agro-ecological zones ---------- */
+const ZONES = [
+  {id:"terai",   ne:"तराई",        en:"Terai",        sub:"६०–३०० मि.", subEn:"60–300 m",    ic:"🌾"},
+  {id:"inner",   ne:"भित्री मधेश",  en:"Inner Terai",  sub:"३००–६०० मि.", subEn:"300–600 m",   ic:"🌱"},
+  {id:"midhill", ne:"मध्य पहाड",   en:"Mid-hills",    sub:"६००–१५०० मि.",subEn:"600–1500 m",  ic:"⛰️"},
+  {id:"highhill",ne:"उच्च पहाड",   en:"High hills",   sub:"१५००–२५०० मि.",subEn:"1500–2500 m",ic:"🏔️"},
+  {id:"mountain",ne:"हिमाली",      en:"Mountain",     sub:"२५००+ मि.",   subEn:"2500 m+",     ic:"❄️"}
+];
+const LANDS = [
+  {id:"khet", ne:"खेत", en:"Irrigated khet", hint:"सिँचाइ छ, पानी जम्छ", hintEn:"Irrigated, holds water", ic:"💧"},
+  {id:"bari", ne:"बारी", en:"Rain-fed bari", hint:"आकाशे पानी मात्र",   hintEn:"Rain-fed upland",      ic:"🟫"},
+  {id:"pakho",ne:"पाखो", en:"Sloped pakho", hint:"भिरालो, पानी बग्छ",  hintEn:"Sloped, drains fast",  ic:"📐"},
+  {id:"balaute",ne:"बलौटे",en:"Sandy",      hint:"बालुवा मिसिएको",     hintEn:"Sandy, light soil",    ic:"🏖️"}
+];
+
+/* ---------- crops ---------- */
+const CROPS = {
+  paddy:      {ne:"धान",        en:"Paddy",        ic:"🌾", rate:32,  chg:+1},
+  wheat:      {ne:"गहुँ",        en:"Wheat",        ic:"🌿", rate:34,  chg:0},
+  maize:      {ne:"मकै",        en:"Maize",        ic:"🌽", rate:30,  chg:-1},
+  potato:     {ne:"आलु",        en:"Potato",       ic:"🥔", rate:38,  chg:+3},
+  tomato:     {ne:"गोलभेँडा",    en:"Tomato",       ic:"🍅", rate:45,  chg:-6},
+  cauliflower:{ne:"काउली",      en:"Cauliflower",  ic:"🥦", rate:55,  chg:+4},
+  onion:      {ne:"प्याज",       en:"Onion",        ic:"🧅", rate:62,  chg:+2},
+  mustard:    {ne:"तोरी",        en:"Mustard",      ic:"🌼", rate:118, chg:0},
+  lentil:     {ne:"मुसुरो",      en:"Lentil",       ic:"🫘", rate:145, chg:+5},
+  ginger:     {ne:"अदुवा",       en:"Ginger",       ic:"🫚", rate:120, chg:-8},
+  cardamom:   {ne:"अलैँची",      en:"Cardamom",     ic:"🟤", rate:1450,chg:+40},
+  junar:      {ne:"जुनार",       en:"Junar",        ic:"🍊", rate:88,  chg:+6},
+  apple:      {ne:"स्याउ",       en:"Apple",        ic:"🍎", rate:132, chg:+10},
+  buckwheat:  {ne:"फापर",        en:"Buckwheat",    ic:"🌾", rate:78,  chg:0},
+  pea:        {ne:"केराउ",       en:"Pea",          ic:"🫛", rate:72,  chg:+3},
+  radish:     {ne:"मुला",        en:"Radish",       ic:"🥬", rate:28,  chg:-2}
+};
+
+/* ---------------- backend integration ----------------
+   The app, the API, and the SMS/USSD system were each built and tested
+   in isolation and never actually wired together — see
+   kisan-bazar-weaknesses.md. This section closes that gap for one real
+   vertical slice (login + listing produce), using the SAME crop-code
+   vocabulary the API and SMS/USSD system already share (KAULI, GOLB,
+   ALU...), so a listing made here is genuinely compatible with the
+   real aggregation engine, not just superficially similar to it.
+
+   BACKEND.enabled defaults to false: this file is served as a published
+   static page, and there is no publicly reachable copy of the Flask API
+   for a random visitor's browser to call. Flip it to true (and set
+   baseUrl) once a real API instance is reachable from wherever this
+   page is hosted; everything below is written and integration-tested
+   against the real API already, so that flip is a config change, not
+   new engineering. */
+const CROP_API_CODE = {
+  tomato:"GOLB", cauliflower:"KAULI", potato:"ALU", onion:"PYAJ",
+  mustard:"TORI", lentil:"MUSURO", ginger:"ADUWA", cardamom:"ALAICHI",
+  junar:"JUNAR", apple:"SYAU", buckwheat:"FAPAR", pea:"KERAU",
+  radish:"MULA", paddy:"DHAN", wheat:"GAHU", maize:"MAKAI"
+};
+
+const BACKEND = {
+  enabled: (typeof window !== "undefined" && window.location && typeof URLSearchParams !== "undefined" && new URLSearchParams(window.location.search).get("backend") === "1") || store.get("backendEnabled", false),
+  baseUrl: store.get("apiBaseUrl", "http://localhost:5050"),
+  coopId: "kavre-veg"   // matches the seeded co-op every other sub-project uses
+};
+
+let account = {
+  phone: store.get("accountPhone", ""),
+  name: store.get("accountName", ""),
+  role: store.get("accountRole", "farmer"),
+  isStaff: store.get("accountIsStaff", false),
+  token: store.get("accountToken", null),
+  loginStep: "idle",     // idle -> code_sent
+  codeDraft: "",
+  busy: false,
+  lastError: null
+};
+
+let authModal = {
+  open: false,
+  tab: "login", // "login" | "signup"
+  signupName: "",
+  signupPhone: "",
+  signupRole: "farmer",
+  signupZone: "midhill",
+  signupLand: "bari",
+  signupPayout: "esewa",
+  busy: false,
+  error: null
+};
+
+const DEMO_ACCOUNTS = [
+  { name: "Sarita Tamang", phone: "9841000001", role: "किसान (Farmer)", zone: "midhill", land: "khet", icon: "👩‍🌾" },
+  { name: "Ram Bahadur K.C.", phone: "9841000002", role: "किसान (Farmer)", zone: "midhill", land: "bari", icon: "👨‍🌾" },
+  { name: "Krishna Lama", phone: "9841000004", role: "किसान (Farmer)", zone: "midhill", land: "khet", icon: "🧑‍🌾" },
+  { name: "Kavre Co-op Desk", phone: "9801100000", role: "प्रशासक (Staff/Admin)", zone: "midhill", isStaff: true, icon: "🏢" }
+];
+
+async function apiRequestCode(phone){
+  const res = await fetch(`${BACKEND.baseUrl}/v1/auth/request-code`, {
+    method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({phone})
+  });
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || `request failed (${res.status})`);
+  return data;
+}
+
+async function apiVerifyCode(phone, code){
+  const res = await fetch(`${BACKEND.baseUrl}/v1/auth/verify`, {
+    method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({phone, code})
+  });
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || `verify failed (${res.status})`);
+  return data; // {token, expires_in_seconds}
+}
+
+async function apiCreateListing(token, payload){
+  const res = await fetch(`${BACKEND.baseUrl}/v1/listings`, {
+    method: "POST",
+    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${token}`},
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || `listing failed (${res.status})`);
+  return data;
+}
+
+async function apiSaveLandScan(token, phone, payload){
+  // Sends the derived signals from the scan (land_type, confidence,
+  // color_key, texture, drainage, had_photo) — never the raw photo.
+  // The API stores them, updates the farmer's record, and returns the
+  // saved row. A 401 here means the token expired; caller handles that
+  // the same as a network error: fall through to local-only.
+  const res = await fetch(`${BACKEND.baseUrl}/v1/farmers/${encodeURIComponent(phone)}/land-scan`, {
+    method: "POST",
+    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${token}`},
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || `land-scan save failed (${res.status})`);
+  return data;
+}
+
+async function apiGetLandScan(token, phone){
+  // Fetches the farmer's most recent saved scan so the app can restore
+  // S.land from the server after login — same idea as a listings sync.
+  // Returns null on 404 (no scan on file) instead of throwing, so the
+  // caller can treat "nothing saved" as a normal first-time case.
+  const res = await fetch(`${BACKEND.baseUrl}/v1/farmers/${encodeURIComponent(phone)}/land-scan`, {
+    headers: {"Authorization": `Bearer ${token}`}
+  });
+  if(res.status === 404) return null;
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || `land-scan fetch failed (${res.status})`);
+  return data;
+}
+
+function saveAccount(){
+  store.set("accountPhone", account.phone);
+  store.set("accountName", account.name);
+  store.set("accountRole", account.role);
+  store.set("accountToken", account.token);
+  store.set("accountIsStaff", account.isStaff);
+}
+
+async function doRequestCode(phone){
+  if(!phone || phone.length < 6){
+    account.lastError = T("सही फोन नम्बर लेख्नुहोस्","Enter a valid phone number");
+    render({skipScroll:true}); return;
+  }
+  account.busy = true; account.lastError = null; render({skipScroll:true});
+  try{
+    await apiRequestCode(phone);
+    account.phone = phone; account.loginStep = "code_sent"; account.codeDraft = "";
+    try {
+      const devRes = await fetch(`${BACKEND.baseUrl}/v1/dev/latest-code/${phone}`);
+      if(devRes.ok){
+        const devData = await devRes.json();
+        if(devData && devData.code){
+          account.codeDraft = devData.code;
+          toast(T("परीक्षण कोड: " + devData.code, "Test code: " + devData.code));
+        }
+      }
+    }catch(_e){}
+  }catch(err){
+    account.lastError = err.message || T("सर्भरमा पुग्न सकिएन","Could not reach the server");
+  }
+  account.busy = false; render({skipScroll:true});
+}
+
+async function doVerifyCode(code){
+  if(!code || code.length !== 6){
+    account.lastError = T("६ अंकको कोड लेख्नुहोस्","Enter the 6-digit code");
+    render({skipScroll:true}); return;
+  }
+  account.busy = true; account.lastError = null; render({skipScroll:true});
+  try{
+    const data = await apiVerifyCode(account.phone, code);
+    account.token = data.token; account.loginStep = "idle"; account.codeDraft = "";
+    saveAccount();
+    toast(T("जोडियो","Connected"));
+    // Restore the farmer's last saved land type from the server so the
+    // advisory tab immediately reflects what they set on a previous visit,
+    // without requiring them to re-scan. Silent on any error — the local
+    // S.land is still correct, this is best-effort hydration only.
+    try{
+      const scanRow = await apiGetLandScan(account.token, account.phone);
+      if(scanRow && scanRow.land_type && scanRow.land_type !== S.land){
+        S.land = scanRow.land_type;
+        toast(T("जग्गाको किसिम पुनःप्राप्त: " + scanRow.land_type,
+                "Land type restored: " + scanRow.land_type));
+      }
+    }catch(_e){}
+  }catch(err){
+    account.lastError = err.message || T("प्रमाणित गर्न सकिएन","Could not verify");
+  }
+  account.busy = false; render({skipScroll:true});
+}
+
+async function handlePostBtn(){
+  const cropKey = sell.crop, kg = sell.kg, grade = sell.grade;
+  const mul = {A:1, B:.86, C:.7}[grade];
+  const localRate = Math.round(CROPS[cropKey].rate * mul);
+  const today = L==="ne" ? "आज" : "Today";
+
+  if(BACKEND.enabled && account.token){
+    sell.posting = true; render({skipScroll:true});
+    try{
+      const resp = await apiCreateListing(account.token, {
+        farmer_phone: account.phone, coop_id: BACKEND.coopId,
+        crop_code: CROP_API_CODE[cropKey], grade, quantity_kg: kg
+      });
+      // If this listing was the one that tipped the co-op's pool over its
+      // target, the real aggregation engine returns the lot it just formed —
+      // show that on the offer instead of discarding it.
+      const lotId = resp.lot_formed ? resp.lot_formed.lot_id : null;
+      S.offers.unshift({id:Date.now(), crop:cropKey, kg, grade, status: lotId ? "lot" : "new",
+                         lot:lotId, rate:localRate, day:today, synced:true, remoteId:resp.listing_id});
+      sell = {crop:null, kg:20, grade:"A", posting:false}; S.tab = "today"; render();
+      toast(lotId ? T("लट बन्यो: "+lotId,"Lot formed: "+lotId)
+                  : T("वास्तविक सर्भरमा पुग्यो","Reached the real server"));
+    }catch(err){
+      S.offers.unshift({id:Date.now(), crop:cropKey, kg, grade, status:"new", lot:null,
+                         rate:localRate, day:today, synced:false});
+      sell = {crop:null, kg:20, grade:"A", posting:false}; S.tab = "today"; render();
+      toast(T("सर्भरमा पुगेन — स्थानीय मात्र राखियो","Could not reach the server — saved locally only"));
+    }
+    return;
+  }
+
+  // unchanged original local-only path — runs whenever BACKEND is
+  // disabled or the farmer hasn't logged in, which is every visitor of
+  // the published artifact by default
+  S.offers.unshift({id:Date.now(), crop:cropKey, kg, grade, status:"new", lot:null,
+                     rate:localRate, day:today});
+  sell = {crop:null, kg:20, grade:"A"}; S.tab = "today"; render();
+  toast(T("सहकारीमा पठाइयो","Sent to your co-op"));
+}
+
+/* ---------- land scan: photo color + touch/drainage quiz -> land type ----------
+   Honesty note: a phone photo cannot measure soil pH, nutrients, or texture —
+   that needs a lab or a trained hand. What a photo CAN reasonably suggest is
+   surface colour (a real, if rough, indicator soil scientists do use as one
+   signal among several — dark soils often carry more organic matter, red
+   soils often mean laterite/clay-rich subsoil, pale soils often run sandy).
+   Combined with two questions a camera can't answer (how it feels, how long
+   water stands after rain), this gives a usable guess — not a lab result.
+   It always shows a confidence level and always tells the farmer to confirm
+   with a local agriculture office before a big decision. */
+function rgbToHsl(r, g, b){
+  r/=255; g/=255; b/=255;
+  const max=Math.max(r,g,b), min=Math.min(r,g,b);
+  let h=0, s=0, l=(max+min)/2;
+  if(max!==min){
+    const d = max-min;
+    s = l>0.5 ? d/(2-max-min) : d/(max+min);
+    switch(max){
+      case r: h=(g-b)/d + (g<b?6:0); break;
+      case g: h=(b-r)/d + 2; break;
+      case b: h=(r-g)/d + 4; break;
+    }
+    h *= 60;
+  }
+  return {h, s, l};
+}
+
+// HSL-based, not raw RGB — tested against ordinary brown loam, which
+// naive R>G+k / R>B+k channel comparisons misclassify as "red" far too
+// easily (a plain brown soil satisfies "R somewhat greater than G and B"
+// even with no real reddish saturation). Hue+saturation together is what
+// actually distinguishes a reddish/laterite soil from an ordinary brown one.
+function classifySoilColor(r, g, b){
+  const {h, s, l} = rgbToHsl(r, g, b);
+  if (l < 0.28) return "dark";
+  if (l > 0.70 && s < 0.40) return "pale";
+  if ((h <= 30 || h >= 345) && s > 0.32 && l < 0.65) return "red";
+  return "mixed";
+}
+
+const SOIL_COLOR_INFO = {
+  dark:  {swatch:"#4A3A28", ne:"गाढा/कालो माटो",  en:"Dark soil",   noteNe:"प्रायः धेरै जैविक पदार्थ हुन्छ, उर्वरा हुन सक्छ।", noteEn:"Often carries more organic matter — can be fertile."},
+  red:   {swatch:"#A85A3A", ne:"रातो माटो",        en:"Reddish soil",noteNe:"प्रायः लेटराइट/चिम्ट्याउने प्रकारको हुन्छ, निकास चाहिन्छ।", noteEn:"Often laterite/clay-leaning — usually needs good drainage."},
+  pale:  {swatch:"#D8C9A3", ne:"हल्का/पहेंलो माटो", en:"Pale soil",   noteNe:"प्रायः बालुवा बढी हुन्छ, पानी चाँडै सुक्छ।", noteEn:"Often sandier — water drains away quickly."},
+  mixed: {swatch:"#8A7A5C", ne:"मिश्रित माटो",      en:"Mixed soil",  noteNe:"रङले प्रस्ट देखिएन — दोमट हुन सक्छ।", noteEn:"No strong colour signal — could be a balanced loam."}
+};
+
+// Which answers are considered consistent with each land-type outcome —
+// used only to score confidence, not to pick the outcome (the if/else
+// chain below does that). Kept as an explicit table rather than ad hoc
+// per-branch conditions: the first version of this function had a bug
+// where the "khet" confidence check could structurally never reach
+// "good" (it only ever re-tested the condition that already produced
+// "khet"), while "pakho" could hit "good" even when the texture answer
+// actively contradicted it. Testing this in isolation caught both.
+const LAND_TYPE_SUPPORT = {
+  khet:    {drainage:["khet"],            texture:["clay","mixed"],  colorKey:["dark","mixed"]},
+  balaute: {drainage:["fast"],            texture:["sandy"],         colorKey:["pale"]},
+  pakho:   {drainage:["fast","sometimes"],texture:["sandy","mixed"], colorKey:["red"]},
+  bari:    {drainage:["sometimes","fast"],texture:["mixed","clay"],  colorKey:["dark","mixed","red"]}
+};
+
+function combineLandType(colorKey, texture, drainage){
+  // texture: "clay" | "sandy" | "mixed"   drainage: "khet" | "fast" | "sometimes"
+  let code;
+  if (drainage === "khet") code = "khet";
+  else if (texture === "sandy" || colorKey === "pale") code = "balaute";
+  else if (colorKey === "red" && drainage === "fast") code = "pakho";
+  else code = "bari";
+
+  const sup = LAND_TYPE_SUPPORT[code];
+  let agree = 0, total = 0;
+  if (drainage) { total++; if (sup.drainage.includes(drainage)) agree++; }
+  if (texture)  { total++; if (sup.texture.includes(texture)) agree++; }
+  if (colorKey) { total++; if (sup.colorKey.includes(colorKey)) agree++; }
+
+  let confidence = (total >= 2 && agree === total) ? "good" : "ok";
+  // both answers being the "not sure" options is genuinely low information,
+  // even when that happens to match the fallback code's broad support list
+  if (texture === "mixed" && drainage === "sometimes") confidence = "ok";
+
+  return {code, confidence};
+}
+
+/* ---------- BS calendar ---------- */
+const BS_MONTHS = ["बैशाख","जेठ","असार","साउन","भदौ","असोज","कात्तिक","मंसिर","पुस","माघ","फागुन","चैत"];
+const BS_EN     = ["Baisakh","Jestha","Asar","Shrawan","Bhadau","Asoj","Kartik","Mangsir","Push","Magh","Falgun","Chaitra"];
+const BS_NOW = 5;              // Asoj — mid-Sep to mid-Oct
+const BS_YEAR = 2083;
+
+/* ---------- advisory rule table ---------- */
+/* sow: BS month indices when sowing/transplanting window is open */
+const RULES = [
+  {crop:"wheat",      zones:["terai","inner"],            lands:["khet","bari"],          sow:[6,7],    days:120, why:["धान काटेपछि उपयुक्त — हिउँदे सिँचाइ २–३ पटक चाहिन्छ।","Follows paddy well; needs 2–3 winter irrigations."], note:["मंसिर १५ भित्र छर्नुहोस्, ढिलो भए उत्पादन घट्छ।","Sow before mid-Mangsir — later sowing cuts yield."]},
+  {crop:"lentil",     zones:["terai","inner"],            lands:["bari","balaute"],       sow:[6,7],    days:110, why:["बाँझो खेतमा सिँचाइ बिना हुन्छ, माटोमा नाइट्रोजन थप्छ।","Grows without irrigation and fixes nitrogen."], note:["बीउ उपचार गरेर मात्र छर्नुहोस्।","Treat seed before sowing."]},
+  {crop:"mustard",    zones:["terai","inner","midhill"],  lands:["bari","khet"],          sow:[6,7],    days:100, why:["असोज–कात्तिकमा छर्दा माघमा तेल पेल्न तयार हुन्छ।","Sown now, ready for oil pressing by Magh."], note:["फूल फुल्दा पानी नपरोस् — ओत खोज्ने ठाउँ राख्नुहोस्।","Rain at flowering hurts — plan drainage."]},
+  {crop:"potato",     zones:["terai","inner","midhill"],  lands:["bari","balaute","khet"],sow:[6,7,8],  days:95,  why:["जाडो बढ्दै जाँदा गानो राम्रो बस्छ, बजार भाउ स्थिर छ।","Tubers set well as cold sets in; prices stay firm."], note:["डढुवा रोग लाग्न सक्छ — बीउ आलु प्रमाणित किन्नुहोस्।","Late blight risk — use certified seed."]},
+  {crop:"cauliflower",zones:["midhill","inner","terai"],  lands:["khet","bari"],          sow:[5,6,7],  days:75,  why:["नर्सरी अहिले हाल्दा मंसिर–पुसको उच्च भाउ भेटिन्छ।","Nursery now catches the strong Mangsir–Push price."], note:["सहकारीमार्फत मिलाएर बेच्दा भाउ राम्रो पर्छ।","Selling in a pooled co-op lot gets a better rate."]},
+  {crop:"radish",     zones:["terai","inner","midhill"],  lands:["balaute","bari"],       sow:[5,6,7],  days:45,  why:["छोटो अवधि — ४५ दिनमै नगद हुन्छ।","Short 45-day crop; quick cash."], note:["बलौटे माटोमा जरा सीधा बढ्छ।","Sandy soil gives straighter roots."]},
+  {crop:"pea",        zones:["midhill","inner","terai"],  lands:["bari","khet"],          sow:[6,7],    days:85,  why:["हरियो केराउ काठमाडौँ बजारमा जाडोभरि खोजिन्छ।","Green pea sells all winter in city markets."], note:["उक्याउने टेको अगाडि नै मिलाउनुहोस्।","Arrange trellis support early."]},
+  {crop:"onion",      zones:["terai","inner"],            lands:["khet","bari"],          sow:[6,7],    days:130, why:["आयातित प्याजको भाउ बढ्दा स्थानीय प्याज नाफामूलक छ।","Local onion pays off when import prices rise."], note:["भण्डारण ठाउँ नभए एकैपटक नबेच्नुहोस्।","Without storage, stagger your sales."]},
+  {crop:"buckwheat",  zones:["highhill","mountain"],      lands:["pakho","bari"],         sow:[3,4,5],  days:80,  why:["उच्च भूभागको कम मल चाहिने बाली।","Low-input crop suited to high ground."], note:["असिनाबाट जोगाउन छिटो काट्नुहोस्।","Harvest promptly to avoid hail loss."]},
+  {crop:"apple",      zones:["mountain","highhill"],      lands:["pakho","bari"],         sow:[8,9],    days:0,   why:["बिरुवा पुस–माघमा सार्दा जरा राम्रो बस्छ।","Saplings transplant best in Push–Magh."], note:["फल आउन ३–४ वर्ष लाग्छ — बीचमा तरकारी लगाउनुहोस्।","Fruits in 3–4 years — intercrop vegetables meanwhile."]},
+  {crop:"cardamom",   zones:["midhill","highhill"],       lands:["pakho","bari"],         sow:[2,3],    days:0,   why:["छहारी र चिस्यान चाहिने उच्च मूल्यको बाली।","High-value crop needing shade and moisture."], note:["चुर्के रोगमुक्त बेर्ना मात्र किन्नुहोस्।","Buy only virus-free suckers."]},
+  {crop:"ginger",     zones:["midhill","inner"],          lands:["bari","pakho"],         sow:[11,0],   days:240, why:["चैत–बैशाखमा रोप्ने बाली; अहिले खन्ने समय हो।","Planted Chaitra–Baisakh; now is digging season."], note:["भाउ घटेको छ — सुकाएर सुठो बनाउन विचार गर्नुहोस्।","Prices are down — consider drying into sutho."]},
+  {crop:"junar",      zones:["midhill"],                  lands:["pakho","bari"],         sow:[8,9],    days:0,   why:["सिन्धुली–रामेछापको मुख्य नगदे फल।","The main cash fruit of Sindhuli–Ramechhap."], note:["कात्तिक–मंसिरमा टिप्ने — अहिले मल हाल्ने बेला।","Harvest Kartik–Mangsir; manure now."]},
+  {crop:"paddy",      zones:["terai","inner","midhill"],  lands:["khet"],                 sow:[2,3],    days:145, why:["असार–साउनको मुख्य बाली।","The main Asar–Shrawan crop."], note:["अहिले काट्ने तयारी गर्ने बेला।","Now is harvest-preparation time."]},
+  {crop:"maize",      zones:["midhill","highhill","inner"],lands:["bari","pakho"],        sow:[11,0],   days:130, why:["पहाडको मुख्य चैते बाली।","The main Chaitra crop of the hills."], note:["फौजी कीरा जाँच गर्नुहोस्।","Scout for fall armyworm."]}
+];
+
+/* ---------- weather (demo: modelled on a DHM-style bulletin) ---------- */
+const WEATHER = {
+  terai:   {level:"warn", ne:"भोलि बेलुकादेखि भारी वर्षा — काटेको धान बाहिर नछोड्नुहोस्।", en:"Heavy rain from tomorrow evening — don't leave cut paddy out.",
+            subNe:"कोशी प्रदेशका ६ जिल्लामा ७०–१२० मि.मि. वर्षा हुनसक्ने।", subEn:"70–120 mm expected across 6 Koshi districts.",
+            days:[["आज","Today","⛅",31,10],["भोलि","Tue","🌧️",29,80],["बुध","Wed","🌧️",27,90],["बिहि","Thu","🌦️",28,50],["शुक्र","Fri","☀️",31,10]]},
+  inner:   {level:"warn", ne:"भोलि दिउँसो चट्याङसहित वर्षा — खुला खेतमा नबस्नुहोस्।", en:"Thunderstorms tomorrow afternoon — stay out of open fields.",
+            subNe:"चट्याङको उच्च जोखिम, बिहान ११ देखि ४ बजेसम्म।", subEn:"High lightning risk between 11am and 4pm.",
+            days:[["आज","Today","⛅",30,20],["भोलि","Tue","⛈️",28,70],["बुध","Wed","🌦️",29,40],["बिहि","Thu","⛅",30,20],["शुक्र","Fri","☀️",31,10]]},
+  midhill: {level:"ok",   ne:"तीन दिन घाम लाग्छ — मकै र अदुवा सुकाउने राम्रो मौका।", en:"Three clear days ahead — good window to dry maize and ginger.",
+            subNe:"शुक्रबारदेखि फेरि पानी पर्न सक्छ।", subEn:"Rain may return from Friday.",
+            days:[["आज","Today","☀️",26,0],["भोलि","Tue","☀️",27,5],["बुध","Wed","⛅",26,15],["बिहि","Thu","🌦️",24,45],["शुक्र","Fri","🌧️",22,75]]},
+  highhill:{level:"warn", ne:"बिहीबार असिना पर्न सक्छ — फलेको बाली छोप्नुहोस्।", en:"Hail possible Thursday — cover standing crops.",
+            subNe:"२००० मि. माथि असिनाको सम्भावना ६०%।", subEn:"60% hail chance above 2000 m.",
+            days:[["आज","Today","⛅",19,15],["भोलि","Tue","⛅",18,20],["बुध","Wed","🌦️",17,50],["बिहि","Thu","🌨️",14,80],["शुक्र","Fri","⛅",17,25]]},
+  mountain:{level:"calm", ne:"मौसम सफा छ — स्याउ ओसार्न उपयुक्त हप्ता।", en:"Clear week — good for moving the apple harvest.",
+            subNe:"राति तापक्रम ३° सम्म झर्नेछ।", subEn:"Night temperatures dropping to 3°.",
+            days:[["आज","Today","☀️",14,0],["भोलि","Tue","☀️",15,0],["बुध","Wed","☀️",14,5],["बिहि","Thu","⛅",13,10],["शुक्र","Fri","☀️",13,0]]}
+};
+
+/* ---------- co-op lots for the buyer view ---------- */
+const LOTS = [
+  {id:"KVR-118", crop:"cauliflower", coop:"काभ्रे तरकारी सहकारी", coopEn:"Kavre Vegetable Co-op", kg:410, rate:58, farmers:14, day:"बिहीबार", dayEn:"Thursday", dist:"धुलिखेल → काठमाडौँ", distEn:"Dhulikhel → Kathmandu"},
+  {id:"DHD-207", crop:"tomato",      coop:"धादिङ कृषक समूह",     coopEn:"Dhading Farmer Group",  kg:260, rate:48, farmers:9,  day:"बुधबार",  dayEn:"Wednesday",dist:"गजुरी → काठमाडौँ",  distEn:"Gajuri → Kathmandu"},
+  {id:"ILM-044", crop:"cardamom",    coop:"इलाम अलैँची सहकारी",  coopEn:"Ilam Cardamom Co-op",   kg:85,  rate:1490,farmers:21, day:"शनिबार",  dayEn:"Saturday", dist:"फिक्कल → विराटनगर",  distEn:"Fikkal → Biratnagar"},
+  {id:"MST-012", crop:"apple",       coop:"मुस्ताङ स्याउ उत्पादक",coopEn:"Mustang Apple Growers", kg:540, rate:138, farmers:31, day:"आइतबार",  dayEn:"Sunday",   dist:"मार्फा → पोखरा",     distEn:"Marpha → Pokhara"},
+  {id:"SND-091", crop:"junar",       coop:"सिन्धुली जुनार सहकारी",coopEn:"Sindhuli Junar Co-op",  kg:320, rate:95,  farmers:17, day:"शुक्रबार", dayEn:"Friday",   dist:"कमलामाई → काठमाडौँ", distEn:"Kamalamai → Kathmandu"}
+];
+
+/* ===================================================================
+   render
+   =================================================================== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+const TABS = {
+  farmer:[["today","🏠","आज","Today"],["sell","🧺","बेच्ने","Sell"],["advice","🌱","सल्लाह","Advice"],["mine","👤","मेरो","Mine"]],
+  buyer: [["market","🛒","बजार","Market"],["cart","🧾","अर्डर","Order"],["how","❓","कसरी","How"]],
+  coop:  [["pool","📥","आएका","Incoming"],["route","🚚","बाटो","Route"],["board","📊","हिसाब","Board"]],
+  admin: [["admin_overview","📊","ड्यासबोर्ड","Dashboard"],["admin_farmers","👨‍🌾","किसान","Farmers"],["admin_lots","📦","लट सूची","Lots"],["admin_rates","📈","भाउ अपडेट","Rates"]]
+};
+
+function toast(msg){
+  const t=$("toast"); t.textContent=msg; t.classList.add("on");
+  clearTimeout(toast._h); toast._h=setTimeout(()=>t.classList.remove("on"),2400);
+}
+
+function speak(text){
+  try{
+    if(!("speechSynthesis" in window)){ toast(T("यो फोनमा बोल्ने सुविधा छैन","Speech not available here")); return; }
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text);
+    u.lang = L==="ne" ? "ne-NP" : "en-US"; u.rate=.92;
+    speechSynthesis.speak(u);
+    toast(T("सुन्नुहोस्…","Reading aloud…"));
+  }catch(e){ toast(T("बोल्न सकिएन","Could not read aloud")); }
+}
+
+function header(){
+  $("brandBox").innerHTML = `किसान बजार<small>KISAN BAZAR · ${esc(BS_MONTHS[BS_NOW])} ${esc(N(BS_YEAR))}</small>`;
+  $("langBtn").textContent = L==="ne" ? "English" : "नेपाली";
+  const authBtn = $("authBtn");
+  if(authBtn){
+    if(account.token){
+      const namePart = account.name ? account.name.split(" ")[0] : (account.phone ? account.phone.slice(-4) : "User");
+      authBtn.innerHTML = `👤 ${esc(namePart)}`;
+      authBtn.style.background = "var(--paddy)";
+      authBtn.style.color = "#fff";
+    } else {
+      authBtn.innerHTML = `🔑 ${esc(T("लगइन / दर्ता","Login / Register"))}`;
+      authBtn.style.background = "var(--card)";
+      authBtn.style.color = "var(--ink)";
+    }
+  }
+  const roles=[
+    ["farmer","किसान","Farmer"],
+    ["buyer","किन्ने","Buyer"],
+    ["coop","सहकारी","Co-op"],
+    ["admin","प्रशासक 🛡️","Admin 🛡️"]
+  ];
+  $("roles").innerHTML = roles.map(([id,ne,en])=>
+    `<button class="role" role="tab" aria-selected="${S.role===id}" data-role="${id}">${esc(T(ne,en))}</button>`).join("");
+}
+
+function nav(){
+  $("nav").innerHTML = TABS[S.role].map(([id,ic,ne,en])=>
+    `<button data-tab="${id}" ${S.tab===id?'aria-current="page"':''}>
+       <span class="ic" aria-hidden="true">${ic}</span>${esc(T(ne,en))}</button>`).join("");
+}
+
+/* ---------------- FARMER: today ---------------- */
+function viewToday(){
+  const w = WEATHER[S.zone];
+  const cls = w.level==="warn"?"warn":w.level==="ok"?"warn ok":"warn calm";
+  const kicker = w.level==="warn" ? T("मौसम चेतावनी","Weather warning")
+               : w.level==="ok"   ? T("काम गर्ने मौका","Good working window")
+                                  : T("मौसम सामान्य","Weather steady");
+  const line = T(w.ne,w.en), sub = T(w.subNe,w.subEn);
+
+  const zoneSel = ZONES.map(z=>`<option value="${z.id}" ${S.zone===z.id?"selected":""}>${esc(T(z.ne,z.en))} · ${esc(T(z.sub,z.subEn))}</option>`).join("");
+
+  const fc = w.days.map(([ne,en,ic,t,r])=>
+    `<div class="fcd ${r>=60?"wet":""}"><b>${esc(T(ne,en))}</b><div class="ic" aria-hidden="true">${ic}</div>
+     <div class="t">${esc(N(t))}°</div><div class="r">${esc(N(r))}%</div></div>`).join("");
+
+  const near = ["tomato","cauliflower","potato","ginger","onion"].map(k=>{
+    const c=CROPS[k], dir=c.chg>0?"up":c.chg<0?"down":"flat0";
+    const arrow=c.chg>0?"▲":c.chg<0?"▼":"—";
+    return `<div class="prow"><div class="em" aria-hidden="true">${c.ic}</div>
+      <div class="nm"><b>${esc(T(c.ne,c.en))}</b><span>${esc(T("कालीमाटी थोक · प्रतिकेजी","Kalimati wholesale · per kg"))}</span></div>
+      <div class="pr"><b>${esc(money(c.rate))}</b><span class="${dir}">${arrow} ${esc(N(Math.abs(c.chg)))}</span></div></div>`;
+  }).join("");
+
+  const mine = S.offers.filter(o=>o.status!=="paid");
+
+  return `
+  <div class="stack">
+    <div class="${cls}">
+      <div class="warn-kicker">${esc(kicker)}</div>
+      <div class="warn-line">${esc(line)}</div>
+      <div class="warn-sub">${esc(sub)}</div>
+      <button class="speak" data-speak="${esc(line+" "+sub)}">🔊 ${esc(T("सुन्नुहोस्","Read aloud"))}</button>
+      <div class="warn-src">${esc(T("स्रोत: जल तथा मौसम विज्ञान विभाग (नमुना डेटा)","Source: Dept. of Hydrology & Meteorology (demo data)"))}</div>
+    </div>
+
+    <div>
+      <label class="lbl" for="zoneSel">${esc(T("तपाईंको ठाउँ","Your area"))}</label>
+      <select id="zoneSel">${zoneSel}</select>
+    </div>
+
+    <h2 class="sec">${esc(T("पाँच दिनको मौसम","Next five days"))}</h2>
+    <div class="fc">${fc}</div>
+
+    <h2 class="sec">${esc(T("आजको भाउ","Today's rates"))}</h2>
+    <div class="prices">${near}</div>
+
+    <h2 class="sec">${esc(T("मैले बेच्न राखेको","What I've listed"))}</h2>
+    <div class="card" style="padding:0">
+      ${mine.length ? mine.map(offerRow).join("") : `<div class="empty"><span class="ic">🧺</span>
+        <b>${esc(T("अहिले केही राखेको छैन","Nothing listed yet"))}</b>
+        ${esc(T("तल 'बेच्ने' थिचेर आफ्नो उत्पादन राख्नुहोस्।","Tap Sell below to list your harvest."))}</div>`}
+    </div>
+
+    <div class="sms"><b>${esc(T("SMS मा पनि आउँछ","Also sent by SMS"))}</b>
+      ${esc(T("इन्टरनेट नभएको बेला यही चेतावनी सादा फोनमा SMS र IVR कलबाट पुग्छ।",
+              "When there's no internet, the same warning reaches basic phones by SMS and IVR call."))}</div>
+
+    <div class="demo">${esc(T("यो नमुना संस्करण हो। मौसम र भाउ वास्तविक API बाट जोडिनुपर्छ।",
+                              "Prototype. Weather and rates must be wired to live APIs."))}</div>
+  </div>`;
+}
+
+function offerRow(o){
+  const c=CROPS[o.crop];
+  const st = o.status==="paid" ? ["t-paid", T("भुक्तानी भयो","Paid")]
+           : o.status==="lot"  ? ["t-ok",   T("लटमा मिलियो · "+o.lot, "Pooled into "+o.lot)]
+                               : ["t-wait", T("सहकारीको जवाफ पर्खंदै","Waiting on co-op")];
+  // o.synced is only ever set on offers created through the real backend
+  // integration (see handlePostBtn) — undefined for every pre-existing
+  // demo offer and for anything created while BACKEND.enabled is false,
+  // so this renders nothing extra in the default/disabled state.
+  const syncBadge = o.synced === true ? `<span class="tag t-ok" style="margin-left:5px">${esc(T("सर्भरमा ✓","synced ✓"))}</span>`
+                   : o.synced === false ? `<span class="tag t-wait" style="margin-left:5px">${esc(T("स्थानीय मात्र","local only"))}</span>`
+                   : "";
+  return `<div class="item"><div class="em" aria-hidden="true">${c.ic}</div>
+    <div class="bd"><b>${esc(T(c.ne,c.en))} · ${esc(N(o.kg))} ${esc(T("के.जी.","kg"))}</b>
+      <p>${esc(T("श्रेणी","Grade"))} ${esc(o.grade)} · ${esc(T(o.day,o.day))}</p>
+      <span class="tag ${st[0]}">${esc(st[1])}</span>${syncBadge}</div>
+    <div class="money">${esc(money(o.kg*o.rate))}</div></div>`;
+}
+
+/* ---------------- FARMER: sell ---------------- */
+let sell = {crop:null, kg:20, grade:"A", posting:false};
+
+/* ---------------- FARMER: land scan ---------------- */
+let scan = {
+  mode: "manual",               // "manual" | "scan"
+  step: "intro",                 // intro -> texture -> drainage -> result
+  photoDataUrl: null,
+  colorKey: null,
+  texture: null,
+  drainage: null,
+  result: null,                  // {code, confidence}
+  synced: null                   // null=not yet saved | true=saved to server | false=local only
+};
+
+/* ---------------- AI Sahayak: rule-based assistant ----------------
+   Runs entirely client-side against the app's own live data (current
+   weather zone, today's rates, the advisory rules, the farmer's own
+   ledger) — no network call, so it works with no signal and never
+   needs an API key sitting in a published page's source. It answers a
+   fixed set of real intents well rather than pretending to be a
+   general model; anything outside that set gets a plain fallback that
+   offers a human at the co-op instead of guessing. See
+   kisan-bazar-assistant-notes.md for how a real LLM would slot in
+   behind this for open-ended questions, on the backend only. */
+let sahayakSeen = store.get("sahayakSeen", false);
+let chat = { open: false, messages: [] };
+
+const CROP_ALIASES = {
+  tomato: ["golbheda","tamatar"],
+  cauliflower: ["kauli"],
+  potato: ["aalu","alu"],
+  onion: ["pyaj","pyaaj"],
+  mustard: ["tori","sarsyu"],
+  lentil: ["musuro","daal","dal"],
+  ginger: ["aduwa","adhuwa"],
+  cardamom: ["alaichi"],
+  junar: ["suntala"],
+  apple: ["syau","seu"],
+  buckwheat: ["fapar","phapar"],
+  pea: ["kerau"],
+  radish: ["mula"],
+  paddy: ["dhan","rice"],
+  wheat: ["gahu","gahun"],
+  maize: ["makai","makkai","corn"]
+};
+
+function findCropInText(lowerText){
+  for(const code of Object.keys(CROPS)){
+    const c = CROPS[code];
+    if(lowerText.includes(c.ne) || lowerText.includes(c.en.toLowerCase())) return code;
+  }
+  for(const code of Object.keys(CROP_ALIASES)){
+    for(const a of CROP_ALIASES[code]) if(lowerText.includes(a)) return code;
+  }
+  return null;
+}
+
+const INTENT_KEYWORDS = {
+  weather: ["मौसम","पानी पर्छ","वर्षा","हावापानी","mausam","weather","barsha"],
+  price:   ["भाउ","मूल्य","दाम","बजार भाउ","rate","price","bhau","daam","mulya"],
+  sell:    ["बेच्ने","बेच्न","बिक्री","kasari bechne","sell","bechne"],
+  plant:   ["लगाउने","रोप्ने","के लगाउं","खेती","रोप्न","kheti","lagaune","ropne","plant","grow"],
+  ledger:  ["हिसाब","पैसा आयो","भुक्तानी","payment","paisa","hisab","ledger"],
+  scan:    ["जग्गा जाँच","माटो जाँच","land scan","माटो"],
+  greet:   ["नमस्ते","namaste","hello","hi","हेलो"],
+  help:    ["सहयोग","मद्दत","help","madad"]
+};
+
+function scoreIntent(lowerText){
+  let best = null, bestScore = 0;
+  for(const intent of Object.keys(INTENT_KEYWORDS)){
+    let score = 0;
+    for(const kw of INTENT_KEYWORDS[intent]) if(lowerText.includes(kw)) score++;
+    if(score > bestScore){ bestScore = score; best = intent; }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+function defaultChips(){
+  return [
+    T("आजको मौसम?","Today's weather?"),
+    T("धानको भाउ?","Paddy price?"),
+    T("के लगाउने?","What to plant?"),
+    T("कसरी बेच्ने?","How to sell?")
+  ];
+}
+
+function assistantReply(rawText){
+  const text = (rawText || "").trim();
+  const lower = text.toLowerCase();
+  if(!text){
+    return { text: T("के सोध्नुभयो, बुझिन। फेरि लेख्नुहोस्।","I didn't catch that — try typing again."), chips: defaultChips() };
+  }
+
+  const crop = findCropInText(lower);
+  const intent = scoreIntent(lower);
+
+  // A bare crop name (no other recognized verb) is almost always a price
+  // question — this check runs before the generic intent switch so
+  // "गोलभेँडा?" alone still gets a real answer instead of falling through
+  // to the fallback just because it didn't literally contain "भाउ".
+  if(crop && (intent === "price" || intent === null)){
+    const c = CROPS[crop];
+    const dir = c.chg > 0 ? T("बढेको","up") : c.chg < 0 ? T("घटेको","down") : T("उस्तै","unchanged");
+    return {
+      text: T(`${c.ne}: प्रति के.जी. ${money(c.rate)} (हिजोभन्दा ${dir})`,
+              `${c.en}: ${money(c.rate)} per kg (${dir} from yesterday)`),
+      chips: [T("अर्को बालीको भाउ","Another crop's rate"), T("यो बेच्न चाहन्छु","I want to sell this")]
+    };
+  }
+
+  if(intent === "weather"){
+    const w = WEATHER[S.zone];
+    return { text: T(w.ne, w.en), chips: [T("आजको भाउ पनि हेर्ने","See today's rates too")] };
+  }
+
+  if(intent === "sell"){
+    return {
+      text: T(
+        "बेच्ने ट्याबमा गएर बाली, तौल र श्रेणी छान्नुहोस्, अनि 'सहकारीमा पठाउनुहोस्' थिच्नुहोस्। सहकारीले लट बनाएपछि SMS आउँछ।",
+        "Go to the Sell tab, pick your crop, weight and grade, then tap 'Send to my co-op'. You'll get an SMS once the co-op forms a lot."),
+      chips: [T("धन्यवाद","Thanks")]
+    };
+  }
+
+  if(intent === "plant"){
+    const recs = RULES.filter(r => r.zones.includes(S.zone) && r.lands.includes(S.land) && r.sow.includes(BS_NOW));
+    if(recs.length){
+      const names = recs.slice(0,2).map(r => T(CROPS[r.crop].ne, CROPS[r.crop].en)).join(T(" वा "," or "));
+      return {
+        text: T(`तपाईंको जग्गामा अहिले ${names} लगाउन मिल्छ। थप विवरणको लागि सल्लाह ट्याब हेर्नुहोस्।`,
+                `${names} suits your land right now. See the Advice tab for details.`),
+        chips: [T("धन्यवाद","Thanks")]
+      };
+    }
+    return {
+      text: T("यो महिना तपाईंको जग्गा र क्षेत्रमा मुख्य बाली सुझाव छैन। माटो सुधार्ने राम्रो समय हो।",
+              "No main crop is suggested for your land and area this month — a good time to improve the soil instead."),
+      chips: [T("जग्गा फेरि जाँच्ने","Scan my land again")]
+    };
+  }
+
+  if(intent === "ledger"){
+    const due = S.offers.filter(o => o.status !== "paid").reduce((a,o) => a + o.kg*o.rate, 0);
+    if(due > 0){
+      return {
+        text: T(`तपाईंलाई ${money(due)} आउन बाँकी छ। भुक्तानी सामान्यतया तौलिएको ४८ घण्टाभित्र आउँछ।`,
+                `You have ${money(due)} still to come. Payment usually arrives within 48 hours of weighing.`),
+        chips: [T("धन्यवाद","Thanks")]
+      };
+    }
+    return { text: T("अहिले तपाईंको कुनै भुक्तानी बाँकी छैन।","You have no pending payments right now."),
+             chips: [T("बेच्न सुरु गर्ने","Start selling")] };
+  }
+
+  if(intent === "scan"){
+    return {
+      text: T("सल्लाह ट्याबमा गएर '📷 फोटोबाट जाँच्नुहोस्' थिच्नुहोस् — माटोको फोटो र दुई प्रश्नबाट जग्गाको किसिम अनुमान गर्छ।",
+              "Go to the Advice tab and tap 'Scan by photo' — it estimates your land type from a soil photo and two questions."),
+      chips: [T("धन्यवाद","Thanks")]
+    };
+  }
+
+  if(intent === "greet"){
+    return { text: T("नमस्ते! म तपाईंलाई भाउ, मौसम, बेच्ने वा के लगाउने भन्ने कुरामा मद्दत गर्न सक्छु।",
+                      "Hello! I can help with rates, weather, selling, or what to plant."), chips: defaultChips() };
+  }
+
+  if(intent === "help"){
+    return { text: T("तल कुनै एउटा थिच्नुहोस्, वा आफ्नै शब्दमा सोध्नुहोस्।","Tap one below, or ask in your own words."), chips: defaultChips() };
+  }
+
+  return {
+    text: T("मैले ठ्याक्कै बुझिन। यी मध्ये सोध्न सक्नुहुन्छ, वा सहकारीलाई सिधै फोन गर्नुहोस्।",
+            "I didn't quite understand. You can ask one of these, or call your co-op directly."),
+    chips: defaultChips()
+  };
+}
+
+function ensureGreeting(){
+  if(chat.messages.length === 0){
+    const g = assistantReply(T("नमस्ते","hello"));
+    chat.messages.push({from:"bot", text:g.text, chips:g.chips});
+  }
+}
+
+function sendChatMessage(text){
+  text = (text || "").trim();
+  if(!text) return;
+  chat.messages.push({from:"user", text});
+  const reply = assistantReply(text);
+  chat.messages.push({from:"bot", text:reply.text, chips:reply.chips});
+  render({skipScroll:true});
+  try{
+    const box = $("chatMsgs"); if(box) box.scrollTop = box.scrollHeight;
+    const inp = $("chatInput"); if(inp){ inp.value = ""; inp.focus(); }
+  }catch(e){ /* best-effort UI polish only */ }
+}
+
+function renderSahayak(){
+  ensureGreeting();
+  const badge = (!chat.open && !sahayakSeen) ? '<span class="fabBadge" aria-hidden="true"></span>' : "";
+  const fab = `<button class="fab" id="sahayakFab" aria-label="${esc(T('सहायकसँग कुरा गर्नुहोस्','Chat with assistant'))}">${chat.open?"✕":"🤖"}${badge}</button>`;
+  if(!chat.open) return fab;
+
+  const msgs = chat.messages.map((m,i)=>{
+    const bubbleClass = m.from === "bot" ? "botBubble" : "userBubble";
+    const isLast = i === chat.messages.length - 1;
+    const chips = (isLast && m.chips && m.chips.length)
+      ? `<div class="chatChips">${m.chips.map(c=>`<button class="chip" data-chip="${esc(c)}">${esc(c)}</button>`).join("")}</div>`
+      : "";
+    return `<div class="chatRow ${m.from}"><div class="${bubbleClass}">${esc(m.text)}</div></div>${chips}`;
+  }).join("");
+
+  return fab + `<div class="chatPanel" role="dialog" aria-label="${esc(T('किसान सहायक','Kisan Sahayak'))}">
+    <div class="chatHeader">
+      <span>🤖 ${esc(T('किसान सहायक','Kisan Sahayak'))}</span>
+      <button id="sahayakClose" aria-label="${esc(T('बन्द गर्नुहोस्','Close'))}">✕</button>
+    </div>
+    <div class="chatMsgs" id="chatMsgs">${msgs}</div>
+    <div class="chatInputRow">
+      <input id="chatInput" placeholder="${esc(T('यहाँ लेख्नुहोस्...','Type here...'))}" autocomplete="off">
+      <button id="chatSend" aria-label="${esc(T('पठाउनुहोस्','Send'))}">➤</button>
+    </div>
+  </div>`;
+}
+function viewSell(){
+  const list = ["tomato","cauliflower","potato","onion","ginger","pea","radish","maize","paddy","junar","apple","cardamom"];
+  const grid = list.map(k=>{
+    const c=CROPS[k];
+    return `<button class="pick" data-crop="${k}" aria-pressed="${sell.crop===k}">
+      <span class="ic" aria-hidden="true">${c.ic}</span>${esc(T(c.ne,c.en))}</button>`;
+  }).join("");
+
+  const c = sell.crop ? CROPS[sell.crop] : null;
+  const gradeMul = {A:1, B:.86, C:.7}[sell.grade];
+  const est = c ? c.rate*gradeMul*sell.kg : 0;
+  const alone = c ? c.rate*gradeMul*.78*sell.kg : 0;
+
+  return `
+  <div class="stack">
+    <h2 class="sec">${esc(T("के बेच्ने?","What are you selling?"))}</h2>
+    <div class="grid">${grid}</div>
+
+    <h2 class="sec">${esc(T("कति के.जी.?","How many kg?"))}</h2>
+    <div class="num">
+      <button data-kg="-5" aria-label="${esc(T("घटाउने","Decrease"))}">−</button>
+      <input id="kgIn" inputmode="numeric" value="${esc(N(sell.kg))}" readonly aria-label="${esc(T("तौल के.जी.","Weight in kg"))}">
+      <button data-kg="5" aria-label="${esc(T("बढाउने","Increase"))}">+</button>
+    </div>
+
+    <h2 class="sec">${esc(T("कस्तो माल?","What quality?"))}</h2>
+    <div class="grid c3">
+      ${[["A","राम्रो · ठूलो","Best · large"],["B","मध्यम","Medium"],["C","सानो · दाग","Small · marked"]]
+        .map(([g,ne,en])=>`<button class="pick" data-grade="${g}" aria-pressed="${sell.grade===g}">
+          <span class="ic" aria-hidden="true">${g==="A"?"⭐":g==="B"?"👍":"🙂"}</span>${esc(T(ne,en))}</button>`).join("")}
+    </div>
+
+    ${c ? `
+    <div class="card" style="border-left:7px solid var(--paddy)">
+      <div class="lbl" style="margin-bottom:10px">${esc(T("अनुमानित आम्दानी","What you'd get"))}</div>
+      <div class="kpi">
+        <div><b>${esc(T("सहकारी लटमार्फत","Through co-op lot"))}</b><i style="color:var(--paddy)">${esc(money(est))}</i></div>
+        <div><b>${esc(T("बिचौलियालाई बेच्दा","Selling to a middleman"))}</b><i style="color:var(--ink-3)">${esc(money(alone))}</i></div>
+      </div>
+      <div class="note">🧮 ${esc(T("फरक "+"", "Difference "))}${esc(money(est-alone))} — ${esc(T("सँगै मिलेर गाडी भरिने भएकाले ढुवानी सस्तो पर्छ।","pooling fills a vehicle, so transport costs less."))}</div>
+    </div>` : ""}
+
+    <button class="btn" id="postBtn" ${(sell.crop && !sell.posting)?"":"disabled"}>
+      ${sell.posting ? esc(T("पठाउँदै...","Sending...")) : esc(T("सहकारीमा पठाउनुहोस्","Send to my co-op"))}
+    </button>
+    ${BACKEND.enabled ? `<div class="demo">${account.token
+        ? esc(T("वास्तविक सर्भरमा जोडिएको — यो सिधै अगाडि जान्छ।","Connected to the real server — this goes straight through."))
+        : esc(T("वास्तविक सर्भरमा जोडिएको छैन — 'मेरो' ट्याबमा गएर जोड्नुहोस्, नत्र स्थानीय मात्र राखिन्छ।","Not connected to the real server — connect from the 'Mine' tab, or this stays local only."))}</div>`
+      : `<div class="demo">${esc(T("सहकारीले स्वीकारेपछि टिप्ने दिन र समय SMS आउँछ।",
+                              "Once the co-op accepts, you get the pickup day and time by SMS."))}</div>`}
+  </div>`;
+}
+
+/* ---------------- FARMER: advice ---------------- */
+function renderLandScan(){
+  const steps = ["intro","texture","drainage","result"];
+  const dots = `<div class="stepdots">${steps.map(s=>`<span aria-current="${scan.step===s}"></span>`).join("")}</div>`;
+
+  if (scan.step === "intro"){
+    return dots + `<div class="scanBox">
+      ${scan.photoDataUrl ? `<img class="photoPreview" src="${scan.photoDataUrl}" alt="">` : `<span class="ic" aria-hidden="true">🌱📷</span>`}
+      <div style="font-weight:700;font-size:16px">${esc(T("आफ्नो जग्गाको माटोको फोटो खिच्नुहोस्","Take a photo of your land's soil"))}</div>
+      <div style="color:var(--ink-2);font-size:14px;margin-top:5px">${esc(T("घाममा, नजिकबाट खिच्नुहोस् — माटोको रङ छर्लंग देखियोस्।","In daylight, close up — so the soil colour shows clearly."))}</div>
+      <button class="camBtn" id="scanCapture">📷 ${esc(scan.photoDataUrl ? T("फेरि खिच्नुहोस्","Retake photo") : T("फोटो खिच्नुहोस्","Take photo"))}</button>
+      <div style="margin-top:14px">
+        <button class="btn" id="scanNext" ${scan.photoDataUrl ? "" : "disabled"}>${esc(T("अगाडि बढ्नुहोस्","Continue"))}</button>
+        ${!scan.photoDataUrl ? `<div style="margin-top:8px"><button class="btn ghost" id="scanSkipPhoto">${esc(T("फोटो बिना अगाडि बढ्नुहोस्","Continue without a photo"))}</button></div>` : ""}
+      </div>
+    </div>`;
+  }
+
+  if (scan.step === "texture"){
+    const opts = [
+      ["clay",  "टाँसिने · च्याप्दा डल्लो बन्छ",     "Sticky · forms a ball when squeezed"],
+      ["sandy", "खुकुलो · हातबाट चाँडै झर्छ",         "Loose · falls apart quickly"],
+      ["mixed", "दुवै अलिअलि · ठ्याक्कै थाहा भएन",     "A bit of both · not sure"]
+    ];
+    return dots + `<div class="card">
+      <div style="font-weight:700;font-size:16px;margin-bottom:12px">${esc(T("अलिकति माटो हातमा लिएर छुनुहोस् — कस्तो लाग्छ?","Pick up a little soil and feel it — how is it?"))}</div>
+      ${opts.map(([k,ne,en])=>`<button class="qopt" data-texture="${k}" aria-pressed="${scan.texture===k}">${esc(T(ne,en))}</button>`).join("")}
+    </div>`;
+  }
+
+  if (scan.step === "drainage"){
+    const opts = [
+      ["khet",      "धेरै बेर जम्छ (घण्टौं वा दिनौं)", "Stands a long time (hours or days)"],
+      ["fast",      "चाँडै सुक्छ (छिनभित्रै)",          "Drains away fast (within minutes)"],
+      ["sometimes", "बेलाबेला मात्र जम्छ",              "Only sometimes"]
+    ];
+    return dots + `<div class="card">
+      <div style="font-weight:700;font-size:16px;margin-bottom:12px">${esc(T("पानी परेपछि जमिनमा पानी कति बेर बस्छ?","After rain, how long does water sit on the ground?"))}</div>
+      ${opts.map(([k,ne,en])=>`<button class="qopt" data-drainage="${k}" aria-pressed="${scan.drainage===k}">${esc(T(ne,en))}</button>`).join("")}
+    </div>`;
+  }
+
+  if (scan.step === "result" && scan.result){
+    const info = SOIL_COLOR_INFO[scan.colorKey] || SOIL_COLOR_INFO.mixed;
+    const land = LANDS.find(l=>l.id===scan.result.code);
+    const confClass = scan.result.confidence === "good" ? "confGood" : "confOk";
+    const confLabel = scan.result.confidence === "good" ? T("राम्रो अनुमान","Good confidence") : T("ठीकै अनुमान","Rough estimate");
+    // Sync badge mirrors the pattern used by offer rows — only shown once
+    // the farmer has tapped "Use this" (scan.synced is null before that).
+    const syncBadge = scan.synced === true
+      ? `<span class="tag t-ok" style="margin-left:5px">${esc(T("सर्भरमा ✓","saved ✓"))}</span>`
+      : scan.synced === false
+      ? `<span class="tag t-wait" style="margin-left:5px">${esc(T("स्थानीय मात्र","local only"))}</span>`
+      : "";
+    return `<div class="stack">
+      <div class="card" style="border-left:7px solid var(--paddy)">
+        ${scan.photoDataUrl ? `<img class="photoPreview" src="${scan.photoDataUrl}" alt="">` : ""}
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span aria-hidden="true" style="font-size:22px">${land.ic}</span>
+          <div style="font-weight:800;font-size:18px">${esc(T(land.ne,land.en))}</div>
+          ${syncBadge}
+        </div>
+        <span class="confBadge ${confClass}">● ${esc(confLabel)}</span>
+        ${scan.colorKey ? `<div style="margin-top:10px;font-size:14px;color:var(--ink-2)">
+          <span class="swatch" style="background:${info.swatch}"></span>${esc(T(info.ne,info.en))} — ${esc(T(info.noteNe,info.noteEn))}
+        </div>` : ""}
+        <div class="scanDisclaimer">⚠️ ${esc(T(
+          "यो फोटो र जवाफबाट अनुमान मात्र हो, प्रयोगशाला जाँच होइन। ठूलो लगानी वा नयाँ बाली रोप्नुअघि नजिकैको कृषि ज्ञान केन्द्र वा जे.टी./जे.टी.ए.सँग जमिन देखाउनुहोस्।",
+          "This is only an estimate from a photo and your answers, not a lab test. Before a big investment or a new crop, show your land to the nearest agriculture knowledge centre or a JT/JTA."))}</div>
+      </div>
+      <div class="grid c2">
+        <button class="btn tori" id="scanUseResult">${esc(T("यही प्रयोग गर्नुहोस्","Use this"))}</button>
+        <button class="btn ghost" id="scanRedo">${esc(T("फेरि जाँच्नुहोस्","Scan again"))}</button>
+      </div>
+    </div>`;
+  }
+
+  return "";
+}
+
+function viewAdvice(){
+  const zoneGrid = ZONES.map(z=>`<button class="pick" data-zone="${z.id}" aria-pressed="${S.zone===z.id}">
+    <span class="ic" aria-hidden="true">${z.ic}</span>${esc(T(z.ne,z.en))}</button>`).join("");
+  const landGrid = LANDS.map(l=>`<button class="pick" data-land="${l.id}" aria-pressed="${S.land===l.id}">
+    <span class="ic" aria-hidden="true">${l.ic}</span>${esc(T(l.ne,l.en))}</button>`).join("");
+
+  // While a scan is in progress (photo/questions not yet finished), there's
+  // no land type to base a recommendation on — show a placeholder instead of
+  // stale results from whatever S.land was set to before. Once scan.result
+  // exists, preview recs against it immediately, before the farmer even taps
+  // "Use this" — confirming just persists the choice for next time.
+  const effectiveLand = (scan.mode==="scan" && scan.result) ? scan.result.code : S.land;
+  const scanPending = scan.mode==="scan" && !scan.result;
+  const recs = scanPending ? [] : RULES.filter(r=> r.zones.includes(S.zone) && r.lands.includes(effectiveLand) && r.sow.includes(BS_NOW));
+  const soon = scanPending ? [] : RULES.filter(r=> r.zones.includes(S.zone) && r.lands.includes(effectiveLand)
+                 && !r.sow.includes(BS_NOW) && r.sow.includes((BS_NOW+1)%12));
+
+  const card = (r,i)=>{
+    const c=CROPS[r.crop];
+    const harvest = r.days ? BS_MONTHS[(BS_NOW + Math.round(r.days/30))%12] : null;
+    const harvestEn = r.days ? BS_EN[(BS_NOW + Math.round(r.days/30))%12] : null;
+    const why = T(r.why[0], r.why[1]);
+    const note = T(r.note[0], r.note[1]);
+    return `<div class="rec ${["","b","c"][i%3]}">
+      <h3><span aria-hidden="true">${c.ic}</span>${esc(T(c.ne,c.en))}</h3>
+      <p class="why">${esc(why)}</p>
+      <div class="facts">
+        <div><b>${esc(T("छर्ने/रोप्ने","Sow / plant"))}</b><i>${esc(T(BS_MONTHS[BS_NOW],BS_EN[BS_NOW]))}</i></div>
+        <div><b>${esc(T("काट्ने अनुमान","Harvest around"))}</b><i>${r.days?esc(T(harvest,harvestEn)):esc(T("बहुवर्षे","Perennial"))}</i></div>
+        <div><b>${esc(T("अवधि","Duration"))}</b><i>${r.days?esc(N(r.days))+" "+esc(T("दिन","days")):esc(T("३–४ वर्ष","3–4 yrs"))}</i></div>
+        <div><b>${esc(T("आजको भाउ","Rate today"))}</b><i>${esc(money(c.rate))}/${esc(T("के.जी.","kg"))}</i></div>
+      </div>
+      <div class="note">⚠️ ${esc(note)}</div>
+      <button class="speak" data-speak="${esc(T(c.ne,c.en)+"। "+why+" "+note)}">🔊 ${esc(T("सुन्नुहोस्","Read aloud"))}</button>
+    </div>`;
+  };
+
+  return `
+  <div class="stack">
+    <div class="card calm" style="border-left:7px solid var(--tori);background:var(--tori-soft)">
+      <div class="warn-line" style="font-size:20px">${esc(T(
+        BS_MONTHS[BS_NOW]+" महिना — अहिले के लगाउने?",
+        BS_EN[BS_NOW]+" — what to plant now"))}</div>
+      <div class="warn-sub">${esc(T("तल आफ्नो ठाउँ र जग्गा छान्नुहोस्।","Pick your area and land type below."))}</div>
+    </div>
+
+    <h2 class="sec">${esc(T("तपाईंको ठाउँ","Your area"))}</h2>
+    <div class="grid c3">${zoneGrid}</div>
+
+    <h2 class="sec">${esc(T("कस्तो जग्गा?","What kind of land?"))}</h2>
+    <div class="modeToggle" role="tablist">
+      <button data-scanmode="manual" aria-pressed="${scan.mode==="manual"}">${esc(T("आफैं छान्नुहोस्","Choose myself"))}</button>
+      <button data-scanmode="scan" aria-pressed="${scan.mode==="scan"}">📷 ${esc(T("फोटोबाट जाँच्नुहोस्","Scan by photo"))}</button>
+    </div>
+
+    ${scan.mode==="manual" ? `
+    <div class="grid">${landGrid}</div>
+    <div class="demo" style="text-align:left;padding:0 2px">${esc(T(
+      "खेत = सिँचाइ हुने, पानी जम्ने। बारी = आकाशे पानी। पाखो = भिरालो। बलौटे = बालुवा मिसिएको।",
+      "Khet = irrigated, holds water. Bari = rain-fed. Pakho = sloped. Balaute = sandy."))}</div>
+    ` : renderLandScan()}
+
+    ${scanPending ? "" : `
+    <h2 class="sec">${esc(T("अहिले लगाउन मिल्ने","Ready to plant now"))}</h2>
+    ${recs.length ? recs.map(card).join('<div style="height:12px"></div>')
+      : `<div class="card empty"><span class="ic">🌱</span>
+         <b>${esc(T("यो महिना यो जग्गामा मुख्य बाली छैन","No main crop for this land this month"))}</b>
+         ${esc(T("माटो सुधार्न ढैंचा वा गाईको मल हाल्ने राम्रो समय हो।","Good time for green manure or farmyard compost."))}</div>`}
+    `}
+
+    ${soon.length ? `<h2 class="sec">${esc(T("अर्को महिना तयारी गर्ने: "+BS_MONTHS[(BS_NOW+1)%12],
+                                             "Prepare for "+BS_EN[(BS_NOW+1)%12]))}</h2>
+      ${soon.map(r=>{const c=CROPS[r.crop];return `<div class="item card flat" style="margin-bottom:8px">
+        <div class="em" aria-hidden="true">${c.ic}</div><div class="bd"><b>${esc(T(c.ne,c.en))}</b>
+        <p>${esc(T(r.why[0],r.why[1]))}</p></div></div>`}).join("")}` : ""}
+
+    <div class="demo">${esc(T(
+      "सिफारिस NARC र कृषि विभागको बाली पात्रोमा आधारित हुनुपर्छ। अन्तिम निर्णय आफ्नो जग्गा हेरेर गर्नुहोस्।",
+      "Recommendations should be grounded in NARC and DoA crop calendars. Judge against your own field before deciding."))}</div>
+  </div>`;
+}
+
+/* ---------------- FARMER: mine ---------------- */
+function viewMine(){
+  const paid = S.offers.filter(o=>o.status==="paid").reduce((a,o)=>a+o.kg*o.rate,0);
+  const due  = S.offers.filter(o=>o.status!=="paid").reduce((a,o)=>a+o.kg*o.rate,0);
+  return `
+  <div class="stack">
+    <div class="kpi">
+      <div><b>${esc(T("यो सिजन पाएको","Received this season"))}</b><i style="color:var(--paddy)">${esc(money(paid))}</i></div>
+      <div><b>${esc(T("आउन बाँकी","Still to come"))}</b><i style="color:var(--tori)">${esc(money(due))}</i></div>
+    </div>
+    <div class="card" style="padding:0">
+      ${S.offers.length ? S.offers.map(offerRow).join("")
+        : `<div class="empty"><span class="ic">📋</span><b>${esc(T("रेकर्ड खाली छ","No records yet"))}</b>
+           ${esc(T("बेच्न सुरु गरेपछि यहाँ हिसाब देखिन्छ।","Your ledger appears here once you start selling."))}</div>`}
+    </div>
+    <h2 class="sec">${esc(T("भुक्तानी कहाँ आउँछ","Where payment arrives"))}</h2>
+    <div class="card">
+      <div class="item" style="border:0;padding:0"><div class="em">📱</div><div class="bd">
+        <b>${esc(T("eSewa · ९८४२XXXXXX","eSewa · 9842XXXXXX"))}</b>
+        <p>${esc(T("सहकारीले माल तौलिएको ४८ घण्टाभित्र।","Within 48 hours of the co-op weighing your produce."))}</p></div></div>
+      <div class="divider"></div>
+      <div class="item" style="border:0;padding:0"><div class="em">💵</div><div class="bd">
+        <b>${esc(T("वा नगद — सहकारी कार्यालयमा","Or cash — at the co-op office"))}</b>
+        <p>${esc(T("मोबाइल वालेट नभएकाले नगद रोज्न सक्नुहुन्छ।","If you don't use a wallet, choose cash."))}</p></div></div>
+    </div>
+    ${renderAccountPanel()}
+    <button class="btn ghost" id="toggleBackendBtn" style="margin-top:6px">${BACKEND.enabled ? esc(T("🔌 सर्भर विच्छेद गर्नुहोस् (अफलाइन मोड)","🔌 Disconnect server (Offline mode)")) : esc(T("🔌 वास्तविक सर्भर जोड्नुहोस् (localhost:5050)","🔌 Connect to real API server (localhost:5050)"))}</button>
+    <button class="btn ghost" id="resetBtn">${esc(T("नमुना डेटा मेटाउनुहोस्","Clear demo data"))}</button>
+  </div>`;
+}
+
+function renderAccountPanel(){
+  // Nothing renders here at all while BACKEND.enabled is false — the
+  // default, published state, where there is genuinely no reachable
+  // server for a login UI to connect to. Showing a non-functional login
+  // form would be worse than showing nothing.
+  if(!BACKEND.enabled) return "";
+
+  let body;
+  if(account.token){
+    body = `<div class="item" style="border:0;padding:0">
+        <div class="em">✅</div>
+        <div class="bd"><b>${esc(T("जोडिएको","Connected"))} · ${esc(account.phone)}</b>
+          <p>${esc(T("तपाईंको लिस्टिङ सिधै वास्तविक सर्भरमा जान्छ।","Your listings go straight to the real server."))}</p></div>
+      </div>
+      <button class="btn ghost" id="logoutBtn" style="margin-top:10px">${esc(T("लगआउट","Log out"))}</button>`;
+  } else if(account.loginStep === "code_sent"){
+    body = `<div class="lbl">${esc(T("कोड पठाइयो — यहाँ लेख्नुहोस्","Code sent — enter it here"))}</div>
+      <div class="num" style="margin-bottom:10px">
+        <input id="codeInput" inputmode="numeric" maxlength="6" placeholder="000000" value="${esc(account.codeDraft)}">
+      </div>
+      <button class="btn" id="verifyCodeBtn" ${account.busy?"disabled":""}>${account.busy?esc(T("जाँच हुँदैछ...","Checking...")):esc(T("प्रमाणित गर्नुहोस्","Verify"))}</button>`;
+  } else {
+    body = `<div class="lbl">${esc(T("फोन नम्बर","Phone number"))}</div>
+      <div class="num" style="margin-bottom:10px">
+        <input id="phoneInput" inputmode="numeric" maxlength="10" placeholder="98XXXXXXXX" value="${esc(account.phone)}">
+      </div>
+      <button class="btn" id="requestCodeBtn" ${account.busy?"disabled":""}>${account.busy?esc(T("पठाउँदै...","Sending...")):esc(T("कोड पठाउनुहोस्","Send code"))}</button>`;
+  }
+  const err = account.lastError ? `<div class="scanDisclaimer" style="margin-top:10px">⚠️ ${esc(account.lastError)}</div>` : "";
+  return `<h2 class="sec">${esc(T("वास्तविक सर्भरमा जोड्नुहोस्","Connect to the real server"))}</h2>
+    <div class="card">${body}${err}</div>`;
+}
+
+/* ---------------- BUYER ---------------- */
+function viewMarket(){
+  return `<div class="stack">
+    <div class="card" style="border-left:7px solid var(--paddy)">
+      <div class="warn-line" style="font-size:20px">${esc(T("सहकारीबाट सिधै","Straight from the co-op"))}</div>
+      <div class="warn-sub">${esc(T("मंगलबार अर्डर → बुधबार टिप्ने → बिहीबार डेलिभरी।","Order Tuesday → picked Wednesday → delivered Thursday."))}</div>
+    </div>
+    ${LOTS.map(l=>{
+      const c=CROPS[l.crop], q=S.cart[l.id]||0;
+      return `<div class="card" style="padding:0">
+        <div class="item" style="border:0">
+          <div class="em" aria-hidden="true">${c.ic}</div>
+          <div class="bd"><b>${esc(T(c.ne,c.en))} · ${esc(N(l.kg))} ${esc(T("के.जी. उपलब्ध","kg available"))}</b>
+            <p>${esc(T(l.coop,l.coopEn))} · ${esc(N(l.farmers))} ${esc(T("किसान","farmers"))}</p>
+            <p style="color:var(--ink-3)">${esc(T(l.dist,l.distEn))} · ${esc(T(l.day,l.dayEn))}</p>
+          </div>
+          <div class="money">${esc(money(l.rate))}<div style="font-size:12px;font-weight:600;color:var(--ink-3)">${esc(T("प्रति के.जी.","per kg"))}</div></div>
+        </div>
+        <div style="padding:0 15px 15px">
+          <div class="num"><button data-lot="${l.id}" data-d="-5">−</button>
+          <input value="${esc(N(q))} ${esc(T("के.जी.","kg"))}" readonly aria-label="${esc(T("अर्डर मात्रा","Order quantity"))}">
+          <button data-lot="${l.id}" data-d="5">+</button></div>
+        </div>
+      </div>`;
+    }).join("")}
+  </div>`;
+}
+
+function viewCart(){
+  const rows = Object.entries(S.cart).filter(([,q])=>q>0);
+  const total = rows.reduce((a,[id,q])=>{const l=LOTS.find(x=>x.id===id); return a+l.rate*q;},0);
+  if(!rows.length) return `<div class="empty card"><span class="ic">🧾</span>
+    <b>${esc(T("अर्डर खाली छ","Your order is empty"))}</b>
+    ${esc(T("बजारबाट लट छान्नुहोस्।","Pick a lot from the market."))}</div>`;
+  return `<div class="stack">
+    <div class="card" style="padding:0">
+    ${rows.map(([id,q])=>{const l=LOTS.find(x=>x.id===id), c=CROPS[l.crop];
+      return `<div class="item"><div class="em">${c.ic}</div><div class="bd">
+        <b>${esc(T(c.ne,c.en))} · ${esc(N(q))} ${esc(T("के.जी.","kg"))}</b>
+        <p>${esc(T(l.coop,l.coopEn))} · ${esc(T(l.day,l.dayEn))}</p></div>
+        <div class="money">${esc(money(l.rate*q))}</div></div>`}).join("")}
+    </div>
+    <div class="kpi">
+      <div><b>${esc(T("जम्मा","Total"))}</b><i>${esc(money(total))}</i></div>
+      <div><b>${esc(T("किसानसम्म पुग्ने","Reaching farmers"))}</b><i style="color:var(--paddy)">${esc(money(total*.82))}</i></div>
+    </div>
+    <button class="btn" id="orderBtn">${esc(T("अर्डर पक्का गर्नुहोस्","Confirm order"))}</button>
+    <div class="demo">${esc(T("भुक्तानी: eSewa, खल्ती, फोनपे वा डेलिभरीमा नगद।","Payment: eSewa, Khalti, Fonepay, or cash on delivery."))}</div>
+  </div>`;
+}
+
+function viewHow(){
+  const steps = [
+    ["🧺", "किसानले माल दर्ता गर्छ","Farmer lists the harvest","बिहान उठेर जति टिप्यो, त्यति एप वा SMS मा हाल्छ।","Whatever was picked that morning goes in, by app or SMS."],
+    ["🤝", "सहकारीले लट बनाउँछ","Co-op builds a lot","२० किसानको ३ के.जी. जोडिएर ४०० के.जी.को एउटा लट बन्छ।","Twenty farmers' 3 kg each becomes one 400 kg lot."],
+    ["🚚", "एउटै गाडी, एउटै बाटो","One vehicle, one route","गाडी भरिने भएकाले प्रतिकेजी ढुवानी खर्च आधा हुन्छ।","A full vehicle halves the per-kg transport cost."],
+    ["📦", "सहरमा डेलिभरी","Delivered in the city","होटल, छात्रावास, पसल र घरमा तोकिएको दिन।","Hotels, hostels, shops and homes on a fixed day."],
+    ["💸", "४८ घण्टामा भुक्तानी","Paid within 48 hours","तौल भएपछि सिधै किसानको वालेट वा नगदमा।","Straight to the farmer's wallet or cash after weighing."]
+  ];
+  return `<div class="stack">
+    ${steps.map(([ic,ne,en,dne,den],i)=>`<div class="card" style="border-left:7px solid var(--paddy)">
+      <h3 style="font-size:18px;font-weight:800;display:flex;gap:10px;align-items:center">
+        <span aria-hidden="true" style="font-size:24px">${ic}</span>${esc(T(ne,en))}</h3>
+      <p style="color:var(--ink-2);margin-top:6px;font-size:15px">${esc(T(dne,den))}</p></div>`).join("")}
+  </div>`;
+}
+
+/* ---------------- CO-OP ---------------- */
+function viewPool(){
+  const pool = [
+    {n:"सरिता तामाङ", nEn:"Sarita Tamang", crop:"cauliflower", kg:38, w:"धुलिखेल-४", wEn:"Dhulikhel-4"},
+    {n:"राम बहादुर के.सी.", nEn:"Ram Bahadur K.C.", crop:"cauliflower", kg:52, w:"पनौती-२", wEn:"Panauti-2"},
+    {n:"मीना श्रेष्ठ", nEn:"Mina Shrestha", crop:"tomato", kg:21, w:"बनेपा-७", wEn:"Banepa-7"},
+    {n:"कृष्ण लामा", nEn:"Krishna Lama", crop:"cauliflower", kg:44, w:"धुलिखेल-९", wEn:"Dhulikhel-9"},
+    {n:"गीता अधिकारी", nEn:"Gita Adhikari", crop:"tomato", kg:33, w:"नमोबुद्ध-३", wEn:"Namobuddha-3"}
+  ];
+  const byCrop = {};
+  pool.forEach(p=>{ byCrop[p.crop]=(byCrop[p.crop]||0)+p.kg; });
+  return `<div class="stack">
+    <div class="kpi">
+      ${Object.entries(byCrop).map(([k,kg])=>{const c=CROPS[k];
+        return `<div><b>${esc(T(c.ne,c.en))}</b><i>${esc(N(kg))} ${esc(T("के.जी.","kg"))}</i></div>`}).join("")}
+    </div>
+    <div class="card" style="border-left:7px solid var(--tori);background:var(--tori-soft)">
+      <div class="warn-line" style="font-size:19px">${esc(T("काउली ४०० के.जी. नाघ्यो — लट बनाउन मिल्छ।","Cauliflower is over 400 kg — a lot can be formed."))}</div>
+      <div class="warn-sub">${esc(T("एउटा पिकअपमा अटाउने भयो। ढुवानी प्रतिकेजी रु ४ पर्छ।","That fills one pickup. Transport works out to Rs 4 per kg."))}</div>
+    </div>
+    <h2 class="sec">${esc(T("आजका प्रस्ताव","Today's offers"))}</h2>
+    <div class="card" style="padding:0">
+      ${pool.map(p=>{const c=CROPS[p.crop];
+        return `<div class="item"><div class="em" aria-hidden="true">${c.ic}</div><div class="bd">
+          <b>${esc(T(p.n,p.nEn))}</b><p>${esc(T(c.ne,c.en))} · ${esc(N(p.kg))} ${esc(T("के.जी.","kg"))} · ${esc(T(p.w,p.wEn))}</p></div>
+          <div class="money">${esc(money(p.kg*CROPS[p.crop].rate))}</div></div>`}).join("")}
+    </div>
+    <button class="btn" id="lotBtn">${esc(T("काउलीको लट बनाउनुहोस्","Form the cauliflower lot"))}</button>
+  </div>`;
+}
+
+function viewRoute(){
+  const stops = [
+    ["६:३०","6:30","धुलिखेल-४","Dhulikhel-4","२ किसान · ९० के.जी.","2 farmers · 90 kg"],
+    ["७:१५","7:15","धुलिखेल-९","Dhulikhel-9","१ किसान · ४४ के.जी.","1 farmer · 44 kg"],
+    ["७:५०","7:50","पनौती-२","Panauti-2","१ किसान · ५२ के.जी.","1 farmer · 52 kg"],
+    ["८:३०","8:30","बनेपा-७","Banepa-7","२ किसान · ५४ के.जी.","2 farmers · 54 kg"],
+    ["१०:००","10:00","कालीमाटी / खरिदकर्ता","Kalimati / buyers","सम्पूर्ण लट बुझाउने","Hand over full lot"]
+  ];
+  return `<div class="stack">
+    <div class="card" style="border-left:7px solid var(--paddy)">
+      <div class="warn-line" style="font-size:19px">${esc(T("बुधबारको संकलन बाटो","Wednesday collection route"))}</div>
+      <div class="warn-sub">${esc(T("४२ कि.मि. · ५ बिसौनी · अनुमानित ३ घण्टा ३० मिनेट","42 km · 5 stops · about 3 hr 30 min"))}</div>
+    </div>
+    <div class="card" style="padding:0">
+      ${stops.map(([t,te,p,pe,d,de])=>`<div class="item">
+        <div style="font-weight:800;font-size:16px;min-width:56px;color:var(--paddy)">${esc(T(t,te))}</div>
+        <div class="bd"><b>${esc(T(p,pe))}</b><p>${esc(T(d,de))}</p></div></div>`).join("")}
+    </div>
+    <div class="card">
+      <div class="lbl">${esc(T("गाडी","Vehicle"))}</div>
+      <div class="item" style="border:0;padding:0"><div class="em">🛻</div><div class="bd">
+        <b>${esc(T("बा ५ ख ४२१८ · सुरेश तामाङ","Ba 5 Kha 4218 · Suresh Tamang"))}</b>
+        <p>${esc(T("१ टन पिकअप · रु ३,८०० प्रति फेरो","1-ton pickup · Rs 3,800 per trip"))}</p></div></div>
+    </div>
+  </div>`;
+}
+
+function viewBoard(){
+  const rows = [["असोज","Asoj",2840,178],["भदौ","Bhadau",2210,164],["साउन","Shrawan",1680,151],["असार","Asar",1430,146]];
+  const max = Math.max(...rows.map(r=>r[2]));
+  return `<div class="stack">
+    <div class="kpi">
+      <div><b>${esc(T("यो महिना बिक्री","Sold this month"))}</b><i>${esc(N(2840))} ${esc(T("के.जी.","kg"))}</i></div>
+      <div><b>${esc(T("सक्रिय किसान","Active farmers"))}</b><i>${esc(N(178))}</i></div>
+    </div>
+    <h2 class="sec">${esc(T("महिनावारी बिक्री","Monthly volume"))}</h2>
+    <div class="card">
+      ${rows.map(([ne,en,kg,f])=>`<div style="margin-bottom:13px">
+        <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;margin-bottom:5px">
+          <span>${esc(T(ne,en))}</span><span>${esc(N(kg))} ${esc(T("के.जी.","kg"))} · ${esc(N(f))} ${esc(T("किसान","farmers"))}</span></div>
+        <div style="height:11px;background:var(--line);border-radius:99px;overflow:hidden">
+          <div style="height:100%;width:${(kg/max*100).toFixed(0)}%;background:var(--paddy);border-radius:99px"></div></div>
+      </div>`).join("")}
+    </div>
+    <div class="card" style="border-left:7px solid var(--soil)">
+      <div class="lbl">${esc(T("ध्यान दिनुपर्ने","Worth watching"))}</div>
+      <p style="font-size:15px;color:var(--ink-2)">${esc(T(
+        "गोलभेँडाको भाउ १२% घट्यो। अर्को हप्ता लट सानो बनाउनुहोस् वा होटलसँग अग्रिम सम्झौता गर्नुहोस्।",
+        "Tomato rates fell 12%. Keep next week's lot smaller, or pre-commit with a hotel buyer."))}</p>
+    </div>
+  </div>`;
+}
+
+/* ---------------- router ---------------- */
+const VIEWS = {today:viewToday, sell:viewSell, advice:viewAdvice, mine:viewMine,
+                market:viewMarket, cart:viewCart, how:viewHow,
+                pool:viewPool, route:viewRoute, board:viewBoard};
+
+function render(opts){
+  opts = opts || {};
+  document.documentElement.lang = L==="ne" ? "ne" : "en";
+  if(!TABS[S.role].some(t=>t[0]===S.tab)) S.tab = TABS[S.role][0][0];
+  header(); nav();
+  $("main").innerHTML = (VIEWS[S.tab]||viewToday)();
+  $("sahayakRoot").innerHTML = renderSahayak();
+  // chat interactions re-render too (new message, opening the panel) but
+  // must NOT jump the whole page back to top the way a tab switch should —
+  // callers that only touch chat state pass skipScroll.
+  if(!opts.skipScroll) window.scrollTo(0,0);
+  save();
+}
+
+/* ---------------- events ---------------- */
+document.addEventListener("click", e=>{
+  const t = e.target.closest("button");
+  if(!t) return;
+
+  if(t.id==="langBtn"){ L = L==="ne"?"en":"ne"; store.set("lang",L); render(); return; }
+  if(t.dataset.role){ S.role=t.dataset.role; S.tab=TABS[S.role][0][0]; render(); return; }
+  if(t.dataset.tab){ S.tab=t.dataset.tab; render(); return; }
+  if(t.dataset.speak!==undefined){ speak(t.dataset.speak); return; }
+
+  if(t.id==="sahayakFab"){
+    chat.open = !chat.open;
+    if(chat.open && !sahayakSeen){ sahayakSeen = true; store.set("sahayakSeen", true); }
+    render({skipScroll:true});
+    try{ const inp=$("chatInput"); if(inp) inp.focus(); }catch(e){}
+    return;
+  }
+  if(t.id==="sahayakClose"){ chat.open=false; render({skipScroll:true}); return; }
+  if(t.dataset.chip){ sendChatMessage(t.dataset.chip); return; }
+  if(t.id==="chatSend"){ const inp=$("chatInput"); sendChatMessage(inp?inp.value:""); return; }
+
+  if(t.dataset.crop){ sell.crop = sell.crop===t.dataset.crop ? null : t.dataset.crop; render(); return; }
+  if(t.dataset.kg){ sell.kg = Math.max(5, Math.min(2000, sell.kg + +t.dataset.kg)); render(); return; }
+  if(t.dataset.grade){ sell.grade=t.dataset.grade; render(); return; }
+
+  if(t.id==="postBtn" && sell.crop && !sell.posting){ handlePostBtn(); return; }
+
+  if(t.id==="requestCodeBtn" && !account.busy){
+    const inp = $("phoneInput");
+    doRequestCode(inp ? inp.value.trim() : "");
+    return;
+  }
+  if(t.id==="verifyCodeBtn" && !account.busy){
+    const inp = $("codeInput");
+    doVerifyCode(inp ? inp.value.trim() : "");
+    return;
+  }
+  if(t.id==="logoutBtn"){
+    account = {phone:"", token:null, loginStep:"idle", codeDraft:"", busy:false, lastError:null};
+    saveAccount(); render({skipScroll:true});
+    toast(T("लगआउट भयो","Logged out")); return;
+  }
+  if(t.id==="toggleBackendBtn"){
+    BACKEND.enabled = !BACKEND.enabled;
+    store.set("backendEnabled", BACKEND.enabled);
+    render({skipScroll:true});
+    toast(BACKEND.enabled ? T("सर्भर सक्षम गरियो","API backend enabled") : T("स्थानीय मोड","Local-only mode"));
+    return;
+  }
+
+  if(t.dataset.zone){ S.zone=t.dataset.zone; render(); return; }
+  if(t.dataset.land){ S.land=t.dataset.land; render(); return; }
+
+  if(t.dataset.scanmode){
+    scan.mode = t.dataset.scanmode;
+    if(scan.mode==="scan"){ scan.step="intro"; scan.photoDataUrl=null; scan.colorKey=null; scan.texture=null; scan.drainage=null; scan.result=null; scan.synced=null; }
+    render(); return;
+  }
+  if(t.id==="scanCapture"){ $("photoInput").click(); return; }
+  if(t.id==="scanNext"){ scan.step="texture"; render(); return; }
+  if(t.id==="scanSkipPhoto"){ scan.colorKey=null; scan.step="texture"; render(); return; }
+  if(t.dataset.texture){ scan.texture=t.dataset.texture; scan.step="drainage"; render(); return; }
+  if(t.dataset.drainage){
+    scan.drainage=t.dataset.drainage;
+    scan.result = combineLandType(scan.colorKey || "mixed", scan.texture, scan.drainage);
+    scan.step="result"; scan.synced=null; render(); return;
+  }
+  if(t.id==="scanUseResult" && scan.result){
+    S.land = scan.result.code;
+    // Mirror the listing-post pattern: attempt to save to the real API
+    // when connected, fall back to local-only without blocking the UI.
+    if(BACKEND.enabled && account.token){
+      (async()=>{
+        try{
+          await apiSaveLandScan(account.token, account.phone, {
+            land_type:  scan.result.code,
+            confidence: scan.result.confidence,
+            color_key:  scan.colorKey  || null,
+            texture:    scan.texture   || null,
+            drainage:   scan.drainage  || null,
+            had_photo:  !!scan.photoDataUrl
+          });
+          scan.synced = true;
+        }catch(_e){
+          scan.synced = false;
+        }
+        render({skipScroll:true});
+        toast(scan.synced
+          ? T("जग्गाको जाँच सर्भरमा सेभ भयो","Land scan saved to server")
+          : T("जग्गाको किसिम सेट भयो (स्थानीय मात्र)","Land type set (local only)"));
+      })();
+    } else {
+      scan.synced = null;
+      toast(T("जग्गाको किसिम सेट भयो","Land type set"));
+    }
+    scan.mode="manual"; render(); return;
+  }
+  if(t.id==="scanRedo"){
+    scan.step="intro"; scan.photoDataUrl=null; scan.colorKey=null; scan.texture=null; scan.drainage=null; scan.result=null; scan.synced=null;
+    render(); return;
+  }
+
+  if(t.dataset.lot){
+    const id=t.dataset.lot, l=LOTS.find(x=>x.id===id);
+    S.cart[id]=Math.max(0, Math.min(l.kg, (S.cart[id]||0) + (+t.dataset.d)));
+    render(); return;
+  }
+  if(t.id==="orderBtn"){ S.cart={}; S.tab="market"; render(); toast(T("अर्डर पक्का भयो","Order confirmed")); return; }
+  if(t.id==="lotBtn"){ toast(T("लट KVR-११९ बन्यो · ४ किसान","Lot KVR-119 formed · 4 farmers")); return; }
+  if(t.id==="resetBtn"){
+    S.offers=[]; S.cart={}; render(); toast(T("मेटियो","Cleared")); return;
+  }
+});
+
+document.addEventListener("keydown", e=>{
+  if(e.target && e.target.id==="chatInput" && e.key==="Enter"){
+    e.preventDefault();
+    sendChatMessage(e.target.value);
+  }
+  if(e.target && e.target.id==="phoneInput" && e.key==="Enter" && !account.busy){
+    e.preventDefault();
+    doRequestCode(e.target.value.trim());
+  }
+  if(e.target && e.target.id==="codeInput" && e.key==="Enter" && !account.busy){
+    e.preventDefault();
+    doVerifyCode(e.target.value.trim());
+  }
+});
+
+document.addEventListener("change", e=>{
+  if(e.target.id==="zoneSel"){ S.zone=e.target.value; render(); }
+
+  if(e.target.id==="photoInput"){
+    const file = e.target.files && e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev=>{
+      const img = new Image();
+      img.onload = ()=>{
+        try{
+          const canvas = $("scanCanvas");
+          const ctx = canvas.getContext("2d");
+          // downscale to 40x40 before sampling — we only need an average
+          // colour signal, not full resolution, and this keeps it fast
+          // even on a low-end phone.
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          let r=0,g=0,b=0,n=0;
+          for(let i=0;i<data.length;i+=4){ r+=data[i]; g+=data[i+1]; b+=data[i+2]; n++; }
+          r=Math.round(r/n); g=Math.round(g/n); b=Math.round(b/n);
+          scan.colorKey = classifySoilColor(r,g,b);
+        }catch(err){
+          scan.colorKey = null; // canvas analysis failed — proceed without it rather than block the flow
+        }
+        scan.photoDataUrl = ev.target.result;
+        render();
+      };
+      img.onerror = ()=>{ toast(T("फोटो पढ्न सकिएन","Could not read photo")); };
+      img.src = ev.target.result;
+    };
+    reader.onerror = ()=>{ toast(T("फोटो पढ्न सकिएन","Could not read photo")); };
+    reader.readAsDataURL(file);
+    e.target.value = ""; // allow re-selecting the same file for "retake"
+  }
+});
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: kisan_bazar
+      POSTGRES_USER: kisan
+      POSTGRES_PASSWORD: kisan_dev_only
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./migrations:/migrations:ro
+      - ./seed:/seed:ro
+      - kisan_pgdata:/var/lib/postgresql/data
+
+volumes:
+  kisan_pgdata:
