@@ -271,11 +271,13 @@ select{
 
 /* ---------- AI Sahayak (assistant) ---------- */
 .fab{
-  position:fixed; right:max(16px, calc(50% - 215px + 16px)); bottom:calc(88px + env(safe-area-inset-bottom, 0px));
-  width:56px; height:56px; border-radius:50%; background:var(--paddy); color:#fff;
-  font-size:25px; display:flex; align-items:center; justify-content:center;
-  box-shadow:0 6px 18px rgba(0,0,0,.28); z-index:35;
+  position:fixed; right:max(16px, calc(50% - 215px + 16px)); bottom:calc(96px + env(safe-area-inset-bottom, 0px));
+  width:48px; height:48px; border-radius:50%; background:var(--paddy); color:#fff;
+  font-size:22px; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 4px 14px rgba(0,0,0,.25); z-index:35; opacity:.92;
+  transition:opacity .2s, transform .2s;
 }
+.fab:hover{opacity:1; transform:scale(1.05)}
 .fabBadge{
   position:absolute; top:-1px; right:-1px; width:14px; height:14px; border-radius:50%;
   background:var(--alert); border:2px solid var(--paper);
@@ -1393,6 +1395,7 @@ function viewSell(){
     <button class="btn" id="postBtn" ${(sell.crop && !sell.posting)?"":"disabled"}>
       ${sell.posting ? esc(T("पठाउँदै...","Sending...")) : esc(T("सहकारीमा पठाउनुहोस्","Send to my co-op"))}
     </button>
+    ${!sell.crop ? `<div class="demo" style="text-align:center">👆 ${esc(T("पहिले माथिबाट बाली छान्नुहोस्","Pick a crop above first"))}</div>` : ""}
     ${BACKEND.enabled ? `<div class="demo">${account.token
         ? esc(T("वास्तविक सर्भरमा जोडिएको — यो सिधै अगाडि जान्छ।","Connected to the real server — this goes straight through."))
         : esc(T("वास्तविक सर्भरमा जोडिएको छैन — 'मेरो' ट्याबमा गएर जोड्नुहोस्, नत्र स्थानीय मात्र राखिन्छ।","Not connected to the real server — connect from the 'Mine' tab, or this stays local only."))}</div>`
@@ -1589,8 +1592,13 @@ function viewMine(){
         <p>${esc(T("मोबाइल वालेट नभएकाले नगद रोज्न सक्नुहुन्छ।","If you don't use a wallet, choose cash."))}</p></div></div>
     </div>
     ${renderAccountPanel()}
-    <button class="btn ghost" id="toggleBackendBtn" style="margin-top:6px">${BACKEND.enabled ? esc(T("🔌 सर्भर विच्छेद गर्नुहोस् (अफलाइन मोड)","🔌 Disconnect server (Offline mode)")) : esc(T("🔌 वास्तविक सर्भर जोड्नुहोस्","🔌 Connect to real API server"))}</button>
-    <button class="btn ghost" id="resetBtn">${esc(T("नमुना डेटा मेटाउनुहोस्","Clear demo data"))}</button>
+    <details style="margin-top:12px">
+      <summary style="font-size:13px;color:var(--ink-3);cursor:pointer;padding:8px 0">${esc(T("उन्नत सेटिङ","Advanced settings"))}</summary>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+        <button class="btn ghost" id="toggleBackendBtn">${BACKEND.enabled ? esc(T("🔌 सर्भर विच्छेद गर्नुहोस् (अफलाइन मोड)","🔌 Disconnect server (Offline mode)")) : esc(T("🔌 वास्तविक सर्भर जोड्नुहोस्","🔌 Connect to real API server"))}</button>
+        <button class="btn ghost" id="resetBtn">${esc(T("नमुना डेटा मेटाउनुहोस्","Clear demo data"))}</button>
+      </div>
+    </details>
   </div>`;
 }
 
@@ -1730,15 +1738,17 @@ function viewPool(){
   ];
   const byCrop = {};
   pool.forEach(p=>{ byCrop[p.crop]=(byCrop[p.crop]||0)+p.kg; });
+  const cauliKg = byCrop.cauliflower || 0;
+  const lotReady = cauliKg >= 130;
   return `<div class="stack">
     <div class="kpi">
       ${Object.entries(byCrop).map(([k,kg])=>{const c=CROPS[k];
         return `<div><b>${esc(T(c.ne,c.en))}</b><i>${esc(N(kg))} ${esc(T("के.जी.","kg"))}</i></div>`}).join("")}
     </div>
-    <div class="card" style="border-left:7px solid var(--tori);background:var(--tori-soft)">
-      <div class="warn-line" style="font-size:19px">${esc(T("काउली ४०० के.जी. नाघ्यो — लट बनाउन मिल्छ।","Cauliflower is over 400 kg — a lot can be formed."))}</div>
+    ${lotReady ? `<div class="card" style="border-left:7px solid var(--tori);background:var(--tori-soft)">
+      <div class="warn-line" style="font-size:19px">${esc(T(`काउली ${N(cauliKg)} के.जी. पुग्यो — लट बनाउन मिल्छ।`,`Cauliflower reached ${N(cauliKg)} kg — a lot can be formed.`))}</div>
       <div class="warn-sub">${esc(T("एउटा पिकअपमा अटाउने भयो। ढुवानी प्रतिकेजी रु ४ पर्छ।","That fills one pickup. Transport works out to Rs 4 per kg."))}</div>
-    </div>
+    </div>` : ""}
     <h2 class="sec">${esc(T("आजका प्रस्ताव","Today's offers"))}</h2>
     <div class="card" style="padding:0">
       ${pool.map(p=>{const c=CROPS[p.crop];
