@@ -506,7 +506,8 @@ let account = {
   role: store.get("accountRole", "farmer"),
   isStaff: store.get("accountIsStaff", false),
   token: store.get("accountToken", null),
-  loginStep: "idle",     // idle -> code_sent
+  loginStep: "idle",     // idle -> code_sent -> register
+  regRole: "farmer",
   codeDraft: "",
   busy: false,
   lastError: null
@@ -639,6 +640,12 @@ async function doVerifyCode(code){
     try{
       const me = await apiGetMe(account.token);
       account.name = me.name || ""; account.isStaff = !!me.isStaff;
+      account.role = me.role || (me.isStaff ? "staff" : "farmer");
+      saveAccount();
+      // Jump to the user's role panel after login.
+      S.role = account.role === "buyer" ? "buyer"
+             : account.role === "staff" ? "admin" : "farmer";
+      S.tab = TABS[S.role][0][0];
     }catch(e){
       if(e.message && e.message.includes("404")){
         account.loginStep = "register";
@@ -676,6 +683,7 @@ async function apiGetMe(token){
 
 async function doRegister(){
   const name = ($("regName")||{}).value || "";
+  const role = account.regRole === "buyer" ? "buyer" : "farmer";
   const land = ($("regLand")||{}).value || "bari";
   const payout = ($("regPayout")||{}).value || "esewa";
   if(!name.trim()){
@@ -687,13 +695,16 @@ async function doRegister(){
     const res = await fetch(`${BACKEND.baseUrl}/v1/auth/signup`, {
       method:"POST",
       headers: {"Content-Type":"application/json", "Authorization": `Bearer ${account.token}`},
-      body: JSON.stringify({phone: account.phone, name: name.trim(),
+      body: JSON.stringify({phone: account.phone, name: name.trim(), role,
                             land_type: land, payout_method: payout})
     });
     const data = await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.error || `server ${res.status}`);
-    account.name = name.trim(); account.loginStep = "idle";
+    account.name = name.trim(); account.role = role; account.loginStep = "idle";
     saveAccount();
+    // Jump to the role's home panel
+    S.role = role === "buyer" ? "buyer" : role === "staff" ? "admin" : "farmer";
+    S.tab = TABS[S.role][0][0];
     toast(T("दर्ता भयो! स्वागतम्","Registered! Welcome"));
   }catch(err){
     account.lastError = err.message || T("दर्ता हुन सकेन","Registration failed");
@@ -945,12 +956,22 @@ function header(){
       authBtn.style.color = "var(--ink)";
     }
   }
-  const roles=[
-    ["farmer","किसान","Farmer"],
-    ["buyer","किन्ने","Buyer"],
-    ["coop","सहकारी","Co-op"],
-    ["admin","प्रशासक 🛡️","Admin 🛡️"]
-  ];
+  // Role tabs: when logged in, show only the user's own role panel.
+  // Logged-out visitors can browse farmer/buyer/co-op views; admin is
+  // staff-only and shows a login gate.
+  const loggedIn = !!account.token;
+  const roles = loggedIn
+    ? account.role === "staff"
+      ? [["admin","प्रशासक 🛡️","Admin 🛡️"]]
+      : account.role === "buyer"
+        ? [["buyer","किन्ने","Buyer"]]
+        : [["farmer","किसान","Farmer"]]
+    : [
+        ["farmer","किसान","Farmer"],
+        ["buyer","किन्ने","Buyer"],
+        ["coop","सहकारी","Co-op"],
+        ["admin","प्रशासक 🛡️","Admin 🛡️"]
+      ];
   $("roles").innerHTML = roles.map(([id,ne,en])=>
     `<button class="role" role="tab" aria-selected="${S.role===id}" data-role="${id}">${esc(T(ne,en))}</button>`).join("");
 }
@@ -1649,19 +1670,25 @@ function renderAccountPanel(){
       </div>
       <button class="btn ghost" id="logoutBtn" style="margin-top:10px">${esc(T("लगआउट","Log out"))}</button>`;
   } else if(account.loginStep === "register"){
-    // New phone number verified via OTP but no farmer profile yet —
+    // New phone number verified via OTP but no profile yet —
     // collect the basics to complete registration.
     const lands = [["khet","खेत","Khet"],["bari","बारी","Bari"],["pakho","पाखो","Pakho"],["balaute","बलौटे","Balaute"]];
-    body = `<div class="lbl">${esc(T("तपाईंको नाम","Your name"))}</div>
+    const isBuyer = account.regRole === "buyer";
+    body = `<div class="lbl">${esc(T("तपाईं को हुनुहुन्छ?","I am a…"))}</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn ${!isBuyer?"":"ghost"}" id="regRoleFarmer" style="flex:1">🌾 ${esc(T("किसान","Farmer"))}</button>
+        <button class="btn ${isBuyer?"":"ghost"}" id="regRoleBuyer" style="flex:1">🏪 ${esc(T("क्रेता","Buyer"))}</button>
+      </div>
+      <div class="lbl">${esc(T("तपाईंको नाम","Your name"))}</div>
       <div class="num" style="margin-bottom:10px">
         <input id="regName" maxlength="60" placeholder="${esc(T("जस्तै: राम बहादुर","e.g. Ram Bahadur"))}">
       </div>
-      <div class="lbl">${esc(T("जग्गाको किसिम","Land type"))}</div>
+      ${!isBuyer ? `<div class="lbl">${esc(T("जग्गाको किसिम","Land type"))}</div>
       <div class="num" style="margin-bottom:10px">
         <select id="regLand" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:15px">
           ${lands.map(([v,ne,en])=>`<option value="${v}">${esc(T(ne,en))}</option>`).join("")}
         </select>
-      </div>
+      </div>` : ""}
       <div class="lbl">${esc(T("पैसा कसरी लिने?","How to receive payment?"))}</div>
       <div class="num" style="margin-bottom:10px">
         <select id="regPayout" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:15px">
@@ -2066,9 +2093,14 @@ document.addEventListener("click", e=>{
     return;
   }
   if(t.id==="registerBtn" && !account.busy){ doRegister(); return; }
+  if(t.id==="regRoleFarmer"){ account.regRole = "farmer"; render({skipScroll:true}); return; }
+  if(t.id==="regRoleBuyer"){ account.regRole = "buyer"; render({skipScroll:true}); return; }
   if(t.id==="logoutBtn"){
-    account = {phone:"", token:null, loginStep:"idle", codeDraft:"", busy:false, lastError:null};
-    saveAccount(); render({skipScroll:true});
+    account = {phone:"", name:"", role:"farmer", isStaff:false, token:null,
+               loginStep:"idle", regRole:"farmer", codeDraft:"", busy:false, lastError:null};
+    saveAccount();
+    S.role = "farmer"; S.tab = "today";
+    render({skipScroll:true});
     toast(T("लगआउट भयो","Logged out")); return;
   }
   if(t.id==="toggleBackendBtn"){

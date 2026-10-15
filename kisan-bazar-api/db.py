@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS cooperatives (
 CREATE TABLE IF NOT EXISTS farmers (
     phone           TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
+    role            TEXT NOT NULL DEFAULT 'farmer',
+        -- farmer | buyer | staff. Buyers order from lots; staff (admin)
+        -- accounts are created manually, never via self-registration.
     coop_id         TEXT REFERENCES cooperatives(id),
     lat             REAL NOT NULL,
     lon             REAL NOT NULL,
@@ -133,5 +136,14 @@ def init_db(fresh: bool = False):
         DB_PATH.unlink()
     conn = get_db()
     conn.executescript(SCHEMA)
+    # Lightweight migrations for columns added after first deploy.
+    for table, column, ddl in [
+        ("farmers", "role", "TEXT NOT NULL DEFAULT 'farmer'"),
+    ]:
+        cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    # Backfill: existing staff keep staff role.
+    conn.execute("UPDATE farmers SET role='staff' WHERE is_staff=1 AND role='farmer'")
     conn.commit()
     conn.close()

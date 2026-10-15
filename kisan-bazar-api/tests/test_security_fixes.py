@@ -51,11 +51,8 @@ def run():
     r = client.post("/v1/auth/signup",
                     json={"phone": PHONE, "name": "Sarita Tamang", "role": "admin", "is_staff": True},
                     headers={"Authorization": f"Bearer {token}"})
-    assert r.status_code == 201, r.get_json()
-    body = r.get_json()
-    assert body.get("is_staff") is False, body
-    assert "dev_code" not in body, "plaintext OTP must never be in the response"
-    print(f"  PASS — is_staff=False, no dev_code leaked")
+    assert r.status_code == 400, r.get_json()
+    print(f"  PASS — invalid role rejected with 400")
     passed += 1
 
     print("\n=== 3. Signup for someone else's number is rejected ===")
@@ -131,13 +128,36 @@ def run():
     lot = [l for l in r.get_json() if l["id"] == lot_id][0]
     assert lot["status"] == "ready", lot
     pooled = lot["pooled_kg"]
-    r = client.post("/v1/orders", json={"buyer_name": "Hotel Yak", "lot_id": lot_id,
-                                        "quantity_kg": pooled})
+    r = client.post("/v1/orders", json={"buyer_name": "Hotel Yak", "buyer_phone": "9800000001",
+                                        "lot_id": lot_id, "quantity_kg": pooled})
     assert r.status_code == 201, r.get_json()
-    r = client.post("/v1/orders", json={"buyer_name": "Hotel Yak", "lot_id": lot_id,
-                                        "quantity_kg": 1})
+    r = client.post("/v1/orders", json={"buyer_name": "Hotel Yak", "buyer_phone": "9800000001",
+                                        "lot_id": lot_id, "quantity_kg": 1})
     assert r.status_code == 400, r.get_json()
     print(f"  PASS — first order took all {pooled}kg, second order rejected")
+    passed += 1
+
+    # --- role cannot be self-escalated to staff ---
+    r = client.post("/v1/auth/request-code", json={"phone": "9899000011"})
+    code = auth._dev_outbox[-1]["code"]
+    r = client.post("/v1/auth/verify",
+                    json={"phone": "9899000011", "code": code})
+    reg_token = r.get_json()["token"]
+    r = client.post("/v1/auth/signup",
+                    json={"phone": "9899000011", "name": "Mallory",
+                          "role": "staff"},
+                    headers={"Authorization": f"Bearer {reg_token}"})
+    assert r.status_code == 400, r.get_json()
+    assert "staff" in r.get_json()["error"].lower() or "role" in r.get_json()["error"].lower()
+    # buyer role is accepted
+    r = client.post("/v1/auth/signup",
+                    json={"phone": "9899000011", "name": "Mallory",
+                          "role": "buyer"},
+                    headers={"Authorization": f"Bearer {reg_token}"})
+    assert r.status_code == 201, r.get_json()
+    r = client.get("/v1/me", headers={"Authorization": f"Bearer {reg_token}"})
+    assert r.get_json()["role"] == "buyer", r.get_json()
+    print("  PASS — staff role rejected at signup, buyer role stored and returned by /v1/me")
     passed += 1
 
     print(f"\nAll {passed} security regression checks passed.")

@@ -301,16 +301,20 @@ def verify():
 @require_auth
 @require_self("phone")
 def signup():
-    """Register or update a farmer profile.
+    """Register or update a user profile (farmer or buyer).
 
     The caller must already hold a valid bearer token for the phone number
     being registered — i.e. they completed the OTP request/verify flow,
-    proving ownership of the number. Staff status can NEVER be self-granted
-    here (always 0); co-op staff are promoted out-of-band by existing staff.
+    proving ownership of the number. Role can only be 'farmer' or 'buyer';
+    'staff' (admin) is NEVER self-granted — staff accounts are created
+    manually out-of-band by existing staff.
     """
     body = request.get_json(force=True, silent=True) or {}
     phone = (body.get("phone") or "").strip()
     name = (body.get("name") or "").strip()
+    role = (body.get("role") or "farmer").strip().lower()
+    if role not in ("farmer", "buyer"):
+        return jsonify({"error": "role must be 'farmer' or 'buyer'"}), 400
     coop_id = body.get("coop_id") or "kavre-veg"
     land_type = body.get("land_type") or "bari"
     payout_method = body.get("payout_method") or "esewa"
@@ -337,12 +341,12 @@ def signup():
         return jsonify({"error": "unknown coop_id"}), 400
     existing = conn.execute("SELECT phone FROM farmers WHERE phone=?", (phone,)).fetchone()
     if existing:
-        conn.execute("UPDATE farmers SET name=?, land_type=?, payout_method=? WHERE phone=?", (name, land_type, payout_method, phone))
+        conn.execute("UPDATE farmers SET name=?, land_type=?, payout_method=?, role=? WHERE phone=?", (name, land_type, payout_method, role, phone))
     else:
         conn.execute(
-            "INSERT INTO farmers (phone, name, coop_id, lat, lon, payout_method, land_type, is_staff) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (phone, name, coop_id, lat, lon, payout_method, land_type, is_staff)
+            "INSERT INTO farmers (phone, name, role, coop_id, lat, lon, payout_method, land_type, is_staff) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (phone, name, role, coop_id, lat, lon, payout_method, land_type, is_staff)
         )
     conn.commit()
     conn.close()
@@ -625,10 +629,10 @@ def me():
     """The caller's own farmer profile. Returns 404 when the phone verified
     via OTP has no profile yet — the frontend then shows the registration
     form instead of assuming the account exists."""
-    phone = g.farmer_phone
+    phone = g.phone
     conn = db.get_db()
     row = conn.execute(
-        "SELECT phone, name, coop_id, payout_method, land_type, is_staff "
+        "SELECT phone, name, role, coop_id, payout_method, land_type, is_staff "
         "FROM farmers WHERE phone=?", (phone,)).fetchone()
     conn.close()
     if not row:
