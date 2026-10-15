@@ -15,7 +15,7 @@
   tightening that would mean moving to an external script with a nonce
   or hash, which is real extra engineering, not a one-line fix.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none';">
 <title>किसान बजार — Kisan Bazar</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -624,6 +624,18 @@ async function doVerifyCode(code){
     const data = await apiVerifyCode(account.phone, code);
     account.token = data.token; account.loginStep = "idle"; account.codeDraft = "";
     saveAccount();
+    // New farmer? /v1/me 404s when the verified phone has no profile yet —
+    // show the registration form instead of a broken "logged in" state.
+    try{
+      const me = await apiGetMe(account.token);
+      account.name = me.name || ""; account.isStaff = !!me.isStaff;
+    }catch(e){
+      if(e.message && e.message.includes("404")){
+        account.loginStep = "register";
+        account.busy = false; saveAccount(); render({skipScroll:true});
+        return;
+      }
+    }
     toast(T("जोडियो","Connected"));
     // Restore the farmer's last saved land type from the server so the
     // advisory tab immediately reflects what they set on a previous visit,
@@ -639,6 +651,42 @@ async function doVerifyCode(code){
     }catch(_e){}
   }catch(err){
     account.lastError = err.message || T("प्रमाणित गर्न सकिएन","Could not verify");
+  }
+  account.busy = false; render({skipScroll:true});
+}
+
+async function apiGetMe(token){
+  const res = await fetch(`${BACKEND.baseUrl}/v1/me`, {
+    headers: {"Authorization": `Bearer ${token}`}
+  });
+  if(res.status === 404) throw new Error("404 no profile");
+  if(!res.ok) throw new Error(`server ${res.status}`);
+  return res.json();
+}
+
+async function doRegister(){
+  const name = ($("regName")||{}).value || "";
+  const land = ($("regLand")||{}).value || "bari";
+  const payout = ($("regPayout")||{}).value || "esewa";
+  if(!name.trim()){
+    account.lastError = T("नाम लेख्नुहोस्","Please enter your name");
+    render({skipScroll:true}); return;
+  }
+  account.busy = true; account.lastError = null; render({skipScroll:true});
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/auth/signup`, {
+      method:"POST",
+      headers: {"Content-Type":"application/json", "Authorization": `Bearer ${account.token}`},
+      body: JSON.stringify({phone: account.phone, name: name.trim(),
+                            land_type: land, payout_method: payout})
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || `server ${res.status}`);
+    account.name = name.trim(); account.loginStep = "idle";
+    saveAccount();
+    toast(T("दर्ता भयो! स्वागतम्","Registered! Welcome"));
+  }catch(err){
+    account.lastError = err.message || T("दर्ता हुन सकेन","Registration failed");
   }
   account.busy = false; render({skipScroll:true});
 }
@@ -945,7 +993,7 @@ function viewToday(){
 }
 
 function offerRow(o){
-  const c=CROPS[o.crop];
+  const c=CROPS[o.crop]||CROPS.tomato; // guard: corrupt localStorage shouldn't blank the app
   const st = o.status==="paid" ? ["t-paid", T("भुक्तानी भयो","Paid")]
            : o.status==="lot"  ? ["t-ok",   T("लटमा मिलियो · "+o.lot, "Pooled into "+o.lot)]
                                : ["t-wait", T("सहकारीको जवाफ पर्खंदै","Waiting on co-op")];
@@ -1561,6 +1609,29 @@ function renderAccountPanel(){
           <p>${esc(T("तपाईंको लिस्टिङ सिधै वास्तविक सर्भरमा जान्छ।","Your listings go straight to the real server."))}</p></div>
       </div>
       <button class="btn ghost" id="logoutBtn" style="margin-top:10px">${esc(T("लगआउट","Log out"))}</button>`;
+  } else if(account.loginStep === "register"){
+    // New phone number verified via OTP but no farmer profile yet —
+    // collect the basics to complete registration.
+    const lands = [["khet","खेत","Khet"],["bari","बारी","Bari"],["pakho","पाखो","Pakho"],["balaute","बलौटे","Balaute"]];
+    body = `<div class="lbl">${esc(T("तपाईंको नाम","Your name"))}</div>
+      <div class="num" style="margin-bottom:10px">
+        <input id="regName" maxlength="60" placeholder="${esc(T("जस्तै: राम बहादुर","e.g. Ram Bahadur"))}">
+      </div>
+      <div class="lbl">${esc(T("जग्गाको किसिम","Land type"))}</div>
+      <div class="num" style="margin-bottom:10px">
+        <select id="regLand" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:15px">
+          ${lands.map(([v,ne,en])=>`<option value="${v}">${esc(T(ne,en))}</option>`).join("")}
+        </select>
+      </div>
+      <div class="lbl">${esc(T("पैसा कसरी लिने?","How to receive payment?"))}</div>
+      <div class="num" style="margin-bottom:10px">
+        <select id="regPayout" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:15px">
+          <option value="esewa">${esc(T("eSewa","eSewa"))}</option>
+          <option value="khalti">${esc(T("खल्ती","Khalti"))}</option>
+          <option value="cash">${esc(T("नगद — सहकारी कार्यालय","Cash — co-op office"))}</option>
+        </select>
+      </div>
+      <button class="btn" id="registerBtn" ${account.busy?"disabled":""}>${account.busy?esc(T("दर्ता हुँदैछ...","Registering...")):esc(T("दर्ता गर्नुहोस्","Register"))}</button>`;
   } else if(account.loginStep === "code_sent"){
     body = `<div class="lbl">${esc(T("कोड पठाइयो — यहाँ लेख्नुहोस्","Code sent — enter it here"))}</div>
       <div class="num" style="margin-bottom:10px">
@@ -1608,8 +1679,10 @@ function viewMarket(){
 }
 
 function viewCart(){
-  const rows = Object.entries(S.cart).filter(([,q])=>q>0);
-  const total = rows.reduce((a,[id,q])=>{const l=LOTS.find(x=>x.id===id); return a+l.rate*q;},0);
+  // Filter out stale cart entries (lot no longer exists) — a corrupt
+  // localStorage cart must not crash the whole view.
+  const rows = Object.entries(S.cart).filter(([id,q])=>q>0 && LOTS.some(x=>x.id===id));
+  const total = rows.reduce((a,[id,q])=>{const l=LOTS.find(x=>x.id===id); return a+(l?l.rate*q:0);},0);
   if(!rows.length) return `<div class="empty card"><span class="ic">🧾</span>
     <b>${esc(T("अर्डर खाली छ","Your order is empty"))}</b>
     ${esc(T("बजारबाट लट छान्नुहोस्।","Pick a lot from the market."))}</div>`;
@@ -1761,17 +1834,29 @@ function viewAdminGuard(){
   return null;
 }
 
+function adminLoadState(){
+  // Shared loading/error state for admin views. Returns "loading", "error",
+  // or the data. Checks error BEFORE triggering fetch to avoid retry loops.
+  if(adminCache.err){
+    return {state:"error", html:`<div class="stack"><div class="card" style="border-left:7px solid var(--alert)">
+      <p>⚠️ ${esc(adminCache.err)}</p>
+      <button class="btn" id="adminRetryBtn" style="margin-top:10px">${esc(T("फेरि प्रयास गर्नुहोस्","Retry"))}</button>
+    </div></div>`};
+  }
+  if(!adminCache.data){
+    fetchAdminOverview().then(()=>{ adminCache.err=null; render({skipScroll:true}); })
+      .catch(e=>{ adminCache.err = e.message; render({skipScroll:true}); });
+    return {state:"loading", html:`<div class="stack"><div class="card"><p>${esc(T("लोड हुँदैछ...","Loading..."))}</p></div></div>`};
+  }
+  return {state:"ready", data:adminCache.data};
+}
+
 function viewAdminOverview(){
   const guard = viewAdminGuard();
   if(guard) return guard;
-  const d = adminCache.data;
-  if(!d){
-    fetchAdminOverview().then(()=>render({skipScroll:true})).catch(e=>{ adminCache.err = e.message; render({skipScroll:true}); });
-    return `<div class="stack"><div class="card"><p>${esc(T("लोड हुँदैछ...","Loading..."))}</p></div></div>`;
-  }
-  if(adminCache.err){
-    return `<div class="stack"><div class="card" style="border-left:7px solid var(--alert)"><p>⚠️ ${esc(adminCache.err)}</p></div></div>`;
-  }
+  const s = adminLoadState();
+  if(s.state !== "ready") return s.html;
+  const d = s.data;
   const c = d.counts || {};
   return `<div class="stack">
     <div class="kpi">
@@ -1796,11 +1881,9 @@ function viewAdminOverview(){
 function viewAdminLots(){
   const guard = viewAdminGuard();
   if(guard) return guard;
-  const d = adminCache.data;
-  if(!d){
-    fetchAdminOverview().then(()=>render({skipScroll:true})).catch(e=>{ adminCache.err = e.message; render({skipScroll:true}); });
-    return `<div class="stack"><div class="card"><p>${esc(T("लोड हुँदैछ...","Loading..."))}</p></div></div>`;
-  }
+  const _s = adminLoadState();
+  if(_s.state !== "ready") return _s.html;
+  const d = _s.data;
   const forming = (d.lots||[]).filter(l=>l.status==="forming");
   const rest = (d.lots||[]).filter(l=>l.status!=="forming");
   return `<div class="stack">
@@ -1828,11 +1911,9 @@ function viewAdminLots(){
 function viewAdminFarmers(){
   const guard = viewAdminGuard();
   if(guard) return guard;
-  const d = adminCache.data;
-  if(!d){
-    fetchAdminOverview().then(()=>render({skipScroll:true})).catch(e=>{ adminCache.err = e.message; render({skipScroll:true}); });
-    return `<div class="stack"><div class="card"><p>${esc(T("लोड हुँदैछ...","Loading..."))}</p></div></div>`;
-  }
+  const _s = adminLoadState();
+  if(_s.state !== "ready") return _s.html;
+  const d = _s.data;
   return `<div class="stack"><h2 class="sec">${esc(T("किसानहरू","Farmers"))} (${(d.farmers||[]).length})</h2>
     <div class="card" style="overflow-x:auto"><table class="adminTable">
       <tr><th>${esc(T("नाम","Name"))}</th><th>${esc(T("फोन","Phone"))}</th><th>${esc(T("भुक्तानी","Payout"))}</th></tr>
@@ -1843,11 +1924,9 @@ function viewAdminFarmers(){
 function viewAdminRates(){
   const guard = viewAdminGuard();
   if(guard) return guard;
-  const d = adminCache.data;
-  if(!d){
-    fetchAdminOverview().then(()=>render({skipScroll:true})).catch(e=>{ adminCache.err = e.message; render({skipScroll:true}); });
-    return `<div class="stack"><div class="card"><p>${esc(T("लोड हुँदैछ...","Loading..."))}</p></div></div>`;
-  }
+  const _s = adminLoadState();
+  if(_s.state !== "ready") return _s.html;
+  const d = _s.data;
   return `<div class="stack"><h2 class="sec">${esc(T("बाली भाउ","Crop rates"))}</h2>
     <div class="card" style="overflow-x:auto"><table class="adminTable">
       <tr><th>${esc(T("बाली","Crop"))}</th><th>${esc(T("कोड","Code"))}</th></tr>
@@ -1945,6 +2024,7 @@ document.addEventListener("click", e=>{
     doVerifyCode(inp ? inp.value.trim() : "");
     return;
   }
+  if(t.id==="registerBtn" && !account.busy){ doRegister(); return; }
   if(t.id==="logoutBtn"){
     account = {phone:"", token:null, loginStep:"idle", codeDraft:"", busy:false, lastError:null};
     saveAccount(); render({skipScroll:true});
@@ -1959,6 +2039,7 @@ document.addEventListener("click", e=>{
   }
 
   if(t.id==="gotoLoginBtn"){ S.role="farmer"; S.tab="mine"; render(); return; }
+  if(t.id==="adminRetryBtn"){ adminCache = {data:null, at:0}; render({skipScroll:true}); return; }
   if(t.dataset.confirmLot){ doConfirmLot(t.dataset.confirmLot); return; }
   if(t.dataset.zone){ S.zone=t.dataset.zone; render(); return; }
   if(t.dataset.land){ S.land=t.dataset.land; render(); return; }

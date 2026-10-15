@@ -241,18 +241,18 @@ def request_code():
     conn = db.get_db()
     farmer = conn.execute("SELECT phone FROM farmers WHERE phone=?", (phone,)).fetchone()
     conn.close()
-    if not farmer:
-        # Same response whether or not the phone exists — a different
-        # message here ("no such farmer" vs "code sent") would let an
-        # attacker enumerate which phone numbers are registered.
-        pass
-    else:
-        conn = db.get_db()
-        code = auth.create_auth_code(conn, phone)
-        conn.close()
-        import sys
-        sys.stderr.write(f"\n🔔 [SMS GATEWAY MOCK] OTP verification code for {phone}: {code}\n")
-        sys.stderr.flush()
+    # Codes are issued for unknown numbers too — otherwise no new farmer
+    # could ever register (signup requires a verified OTP token). This is
+    # safe: the code goes to the phone's owner via SMS, so requesting a code
+    # for someone else's number only sends THEM a text; the requester never
+    # sees it. SMS-spam is bounded by the rate limit above.
+    # The response is identical either way — no phone-number enumeration.
+    conn = db.get_db()
+    code = auth.create_auth_code(conn, phone)
+    conn.close()
+    import sys
+    sys.stderr.write(f"\n🔔 [SMS GATEWAY MOCK] OTP verification code for {phone}: {code}\n")
+    sys.stderr.flush()
     return jsonify({"message": "if this number is registered, a code has been sent"})
 
 
@@ -327,7 +327,7 @@ def signup():
         lon = float(body.get("lon") if body.get("lon") is not None else 85.55)
     except (TypeError, ValueError):
         return jsonify({"error": "lat/lon must be numbers"}), 400
-    if land_type not in ("bari", "khet", "bagar", "kharbari"):
+    if land_type not in ("khet", "bari", "pakho", "balaute"):
         return jsonify({"error": "unknown land_type"}), 400
 
     conn = db.get_db()
@@ -386,6 +386,13 @@ def create_listing():
     # inject listings into coop B's aggregation pool.
     coop_id = farmer["coop_id"]
 
+    # Validate crop_code against the crops table — an invalid code would
+    # otherwise die as an unhandled 500 on the FK constraint.
+    crop = conn.execute("SELECT code FROM crops WHERE code=?", (body["crop_code"],)).fetchone()
+    if not crop:
+        conn.close()
+        return jsonify({"error": "unknown crop_code"}), 400
+
     cur = conn.execute(
         "INSERT INTO listings (farmer_phone, coop_id, crop_code, grade, quantity_kg) "
         "VALUES (?,?,?,?,?)",
@@ -395,9 +402,10 @@ def create_listing():
     conn.commit()
 
     # aggregation check runs synchronously here for clarity; production
-    # would enqueue this rather than block the request
+    # would enqueue this rather than block the request.
+    # NOTE: uses the farmer's trusted coop_id, not body["coop_id"].
     lot_formed = aggregation.check_and_form_lot(
-        conn, body["coop_id"], body["crop_code"], body["grade"], DEFAULT_TARGET_KG
+        conn, coop_id, body["crop_code"], body["grade"], DEFAULT_TARGET_KG
     )
     conn.close()
 
@@ -610,6 +618,25 @@ def place_order():
 
 
 # ---------------- admin endpoints ----------------
+
+@app.get("/v1/me")
+@require_auth
+def me():
+    """The caller's own farmer profile. Returns 404 when the phone verified
+    via OTP has no profile yet — the frontend then shows the registration
+    form instead of assuming the account exists."""
+    phone = g.farmer_phone
+    conn = db.get_db()
+    row = conn.execute(
+        "SELECT phone, name, coop_id, payout_method, land_type, is_staff "
+        "FROM farmers WHERE phone=?", (phone,)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "no profile yet", "phone": phone}), 404
+    d = dict(row)
+    d["isStaff"] = bool(d.pop("is_staff"))
+    return jsonify(d)
+
 
 @app.get("/v1/admin/overview")
 @require_auth
