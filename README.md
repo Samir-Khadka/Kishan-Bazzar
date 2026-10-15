@@ -27,6 +27,7 @@ python3 seed.py
 python3 tests/test_auth.py
 python3 tests/test_api.py
 python3 tests/test_land_scan.py
+python3 tests/test_security_fixes.py   # regression tests for the Oct 2026 hardening pass
 
 # SMS/USSD demo (from kisan-bazar-sms/)
 python3 tests/test_flows.py
@@ -40,6 +41,36 @@ node test_integration.js    # 37 checks, starts the real API itself
 ## Status
 
 - The app works as a demo. Weather, prices and co-op lots shown in it are sample data.
-- Login and listing produce are wired from the app to the API and tested end to end. This is switched off by default (`BACKEND.enabled` in `kisan-bazar.html`) because no deployed API exists yet.
+- The API is deploy-ready: `wsgi.py` + `render.yaml` serve the app and API from one
+  service (gunicorn). When served from the Flask app on a public host, the frontend
+  auto-enables its backend connection on the same origin — no config needed.
+  Set `KISAN_BAZAR_SECRET` and keep `KISAN_BAZAR_DEMO_MODE=1` only for the public demo
+  (it exposes simulated OTP codes so visitors can log in without a real SMS gateway).
+- Login and listing produce are wired from the app to the API and tested end to end.
 - The PostgreSQL migrations have never been run against a live database.
 - Nothing has been checked with real farmers, co-ops or DHM. See `kisan-bazar-weaknesses.md`.
+
+## Deploying the demo (Render, free tier)
+
+1. Push this repo to GitHub (it is the deploy source).
+2. In Render: New → Web Service → connect the repo. `render.yaml` fills in the
+   build (`pip install -r kisan-bazar-api/requirements.txt`) and start
+   (`gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2`) commands automatically.
+3. Render generates `KISAN_BAZAR_SECRET` for you; `KISAN_BAZAR_DEMO_MODE=1` is already
+   set in `render.yaml` so visitors can log in with the demo accounts below.
+4. Open the service URL — the market loads with the backend already connected.
+
+Demo accounts (OTP code is shown in the app after you request it — demo mode only):
+
+| Who | Phone |
+|---|---|
+| Sarita Tamang (farmer) | 9841000001 |
+| Ram Bahadur K.C. (farmer) | 9841000002 |
+| Mina Shrestha (farmer) | 9841000003 |
+| Krishna Lama (farmer) | 9841000004 |
+| Kavre Co-op Desk (staff) | 9801100000 |
+
+Note: Render's free disk is ephemeral — the demo database re-seeds itself on every
+deploy/restart, so every visitor gets a clean market. Listings made by visitors do
+not persist across restarts. For a persistent database, attach Render Postgres and
+port `db.py` to the `kisan-bazar-db/` migrations.

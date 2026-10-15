@@ -47,15 +47,6 @@ import auth
 
 app = Flask(__name__)
 
-# Auto-seed SQLite database if it doesn't exist yet (for cloud deployments like Render/Heroku/Railway)
-if not os.path.exists(db.DB_PATH):
-    try:
-        import seed
-        seed.seed()
-    except Exception:
-        db.init_db()
-
-
 # vehicle-load target per lot — in production this comes from the co-op's
 # configured target or a standing buyer commitment, not a constant; kept
 # simple here so the aggregation logic is easy to see working.
@@ -66,6 +57,12 @@ DEFAULT_TARGET_KG = 130
 # tonnes in one listing, so reject before it corrupts aggregation math
 # or looks like an attempted overflow/abuse attempt
 MAX_REASONABLE_KG = 5000
+
+# Demo mode: when 1, the /v1/dev/latest-code endpoint serves simulated OTP
+# codes so visitors can log in to a public demo without a real SMS gateway.
+# Explicit opt-in only — never enable where real farmer accounts exist,
+# because it lets anyone read anyone's login code.
+DEMO_MODE = os.environ.get("KISAN_BAZAR_DEMO_MODE", "").lower() in ("1", "true", "yes")
 
 
 # ---------------- error handling: never leak internals ----------------
@@ -118,9 +115,10 @@ def set_security_headers(resp):
 
 
 def _allowed_origins():
-    # Comma-separated list via env var in any real deployment; allows
-    # cross-origin calls if * or matching origins are present.
-    raw = os.environ.get("KISAN_BAZAR_ALLOWED_ORIGINS", "*,http://localhost:5050,http://localhost:8080")
+    # Comma-separated list via env var in any real deployment; falls
+    # back to localhost-only so a forgotten env var fails closed
+    # (nothing allowed cross-origin) rather than failing open.
+    raw = os.environ.get("KISAN_BAZAR_ALLOWED_ORIGINS", "http://localhost:5050,http://localhost:8080")
     return {o.strip() for o in raw.split(",") if o.strip()}
 
 
@@ -182,6 +180,12 @@ def valid_positive_kg(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 < value <= MAX_REASONABLE_KG
 
 
+@app.get("/v1/health")
+def health():
+    """Liveness probe for the hosting platform. No auth, no PII."""
+    return jsonify({"status": "ok", "service": "kisan-bazar-api"})
+
+
 @app.get("/")
 def serve_index():
     html_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kisan-bazar.html")
@@ -224,7 +228,15 @@ def request_code():
 
 @app.get("/v1/dev/latest-code/<phone>")
 def dev_latest_code(phone):
-    """Dev convenience endpoint: returns the latest simulated SMS code for local testing."""
+    """Dev/demo convenience: returns the latest simulated SMS code.
+
+    Only available when KISAN_BAZAR_DEMO_MODE=1. This is what lets visitors
+    log in to the public demo without a real SMS gateway — and it is also
+    why it must NEVER be on for anything holding real farmer data: anyone
+    could read anyone's login code.
+    """
+    if not DEMO_MODE:
+        return jsonify({"error": "not found"}), 404
     for m in reversed(auth._dev_outbox):
         if m.get("phone") == phone:
             return jsonify({"phone": phone, "code": m.get("code")})
@@ -256,26 +268,46 @@ def verify():
 
 
 @app.post("/v1/auth/signup")
+@require_auth
+@require_self("phone")
 def signup():
+    """Register or update a farmer profile.
+
+    The caller must already hold a valid bearer token for the phone number
+    being registered — i.e. they completed the OTP request/verify flow,
+    proving ownership of the number. Staff status can NEVER be self-granted
+    here (always 0); co-op staff are promoted out-of-band by existing staff.
+    """
     body = request.get_json(force=True, silent=True) or {}
     phone = (body.get("phone") or "").strip()
     name = (body.get("name") or "").strip()
     coop_id = body.get("coop_id") or "kavre-veg"
-    lat = float(body.get("lat") or 27.62)
-    lon = float(body.get("lon") or 85.55)
     land_type = body.get("land_type") or "bari"
-    is_staff = 1 if body.get("role") == "admin" or body.get("is_staff") else 0
     payout_method = body.get("payout_method") or "esewa"
+    # is_staff is deliberately NOT read from the request body: honoring
+    # {"role":"admin"} here was a full privilege-escalation hole.
+    is_staff = 0
 
     if not phone or len(phone) < 6:
         return jsonify({"error": "valid phone number is required"}), 400
     if not name:
         return jsonify({"error": "name is required"}), 400
+    try:
+        lat = float(body.get("lat") if body.get("lat") is not None else 27.62)
+        lon = float(body.get("lon") if body.get("lon") is not None else 85.55)
+    except (TypeError, ValueError):
+        return jsonify({"error": "lat/lon must be numbers"}), 400
+    if land_type not in ("bari", "khet", "bagar", "kharbari"):
+        return jsonify({"error": "unknown land_type"}), 400
 
     conn = db.get_db()
+    coop = conn.execute("SELECT id FROM cooperatives WHERE id=?", (coop_id,)).fetchone()
+    if not coop:
+        conn.close()
+        return jsonify({"error": "unknown coop_id"}), 400
     existing = conn.execute("SELECT phone FROM farmers WHERE phone=?", (phone,)).fetchone()
     if existing:
-        conn.execute("UPDATE farmers SET name=?, land_type=?, is_staff=? WHERE phone=?", (name, land_type, is_staff, phone))
+        conn.execute("UPDATE farmers SET name=?, land_type=?, payout_method=? WHERE phone=?", (name, land_type, payout_method, phone))
     else:
         conn.execute(
             "INSERT INTO farmers (phone, name, coop_id, lat, lon, payout_method, land_type, is_staff) "
@@ -283,7 +315,6 @@ def signup():
             (phone, name, coop_id, lat, lon, payout_method, land_type, is_staff)
         )
     conn.commit()
-    code = auth.create_auth_code(conn, phone)
     conn.close()
 
     token = auth.issue_token(phone)
@@ -292,8 +323,7 @@ def signup():
         "phone": phone,
         "name": name,
         "token": token,
-        "dev_code": code,
-        "is_staff": bool(is_staff)
+        "is_staff": False
     }), 201
 
 
@@ -321,10 +351,15 @@ def create_listing():
         conn.close()
         return jsonify({"error": "unknown farmer_phone"}), 404
 
+    # The listing belongs to the farmer's own co-op, never to whatever
+    # coop_id the client sent: trusting the body let a farmer in coop A
+    # inject listings into coop B's aggregation pool.
+    coop_id = farmer["coop_id"]
+
     cur = conn.execute(
         "INSERT INTO listings (farmer_phone, coop_id, crop_code, grade, quantity_kg) "
         "VALUES (?,?,?,?,?)",
-        (body["farmer_phone"], body["coop_id"], body["crop_code"], body["grade"], body["quantity_kg"]),
+        (body["farmer_phone"], coop_id, body["crop_code"], body["grade"], body["quantity_kg"]),
     )
     listing_id = cur.lastrowid
     conn.commit()
@@ -514,6 +549,16 @@ def place_order():
     if body["quantity_kg"] > lot["pooled_kg"]:
         conn.close()
         return jsonify({"error": "quantity exceeds available lot size"}), 400
+    # Oversell guard: earlier orders against this lot reduce what's left.
+    # Without this, N orders each <= pooled_kg could all succeed and sell
+    # the same kilos several times over.
+    already_ordered = conn.execute(
+        "SELECT COALESCE(SUM(quantity_kg), 0) AS total FROM orders WHERE lot_id=?",
+        (body["lot_id"],)
+    ).fetchone()["total"]
+    if already_ordered + body["quantity_kg"] > lot["pooled_kg"]:
+        conn.close()
+        return jsonify({"error": f"only {lot['pooled_kg'] - already_ordered} kg still available on this lot"}), 400
 
     cur = conn.execute(
         "INSERT INTO orders (buyer_name, lot_id, quantity_kg, unit_rate) VALUES (?,?,?,?)",
@@ -531,11 +576,14 @@ def place_order():
 # ---------------- admin endpoints ----------------
 
 @app.get("/v1/admin/overview")
+@require_auth
+@require_staff
 def admin_overview():
+    """Co-op staff dashboard data. Staff-only: this exposes farmer PII."""
     conn = db.get_db()
     farmers = conn.execute("SELECT phone, name, coop_id, lat, lon, payout_method, land_type, is_staff FROM farmers").fetchall()
     listings = conn.execute("SELECT id, farmer_phone, coop_id, crop_code, grade, quantity_kg, quantity_committed_kg, status, created_at FROM listings ORDER BY id DESC LIMIT 50").fetchall()
-    lots = conn.execute("SELECT id, coop_id, crop_code, grade, target_kg, pooled_kg, rate_per_kg, status, created_at, confirmed_at FROM lots ORDER BY created_at DESC").fetchall()
+    lots = conn.execute("SELECT id, coop_id, crop_code, grade, target_kg, pooled_kg, rate_per_kg, status, created_at FROM lots ORDER BY created_at DESC").fetchall()
     crops = conn.execute("SELECT code, name_ne, name_en, shelf_life_hours FROM crops").fetchall()
     orders = conn.execute("SELECT id, buyer_name, lot_id, quantity_kg, unit_rate, created_at FROM orders ORDER BY id DESC").fetchall()
     conn.close()
@@ -555,8 +603,7 @@ def admin_overview():
             "lots": len(lots),
             "total_kg": round(total_kg, 1),
             "pooled_kg": round(pooled_kg, 1)
-        },
-        "sms_outbox": auth._dev_outbox[-15:]
+        }
     })
 
 

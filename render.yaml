@@ -2,10 +2,15 @@ services:
   - type: web
     name: kisan-bazar
     runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --chdir kisan-bazar-api app:app
+    buildCommand: pip install -r kisan-bazar-api/requirements.txt
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2
+    healthCheckPath: /v1/health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
+      - key: KISAN_BAZAR_SECRET
+        generateValue: true
+      - key: KISAN_BAZAR_DEMO_MODE
+        value: "1"
       - key: KISAN_BAZAR_ALLOWED_ORIGINS
-        value: "*"
+        value: ""
+      - key: PYTHON_VERSION
+        value: "3.11.0"

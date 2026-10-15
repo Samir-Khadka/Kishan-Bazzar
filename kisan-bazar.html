@@ -459,9 +459,19 @@ const CROP_API_CODE = {
   radish:"MULA", paddy:"DHAN", wheat:"GAHU", maize:"MAKAI"
 };
 
+/* When this file is served by the Flask app itself (the Render demo), the
+   API is on the same origin — so the backend just works with zero config,
+   and the CSP's connect-src 'self' is satisfied. When opened as a local
+   file or from anywhere else, keep the old behavior: local-only demo mode
+   until the user flips the toggle. */
+const SERVED_FROM_API = !!(typeof window !== "undefined" && window.location
+  && /^https?:$/.test(window.location.protocol)
+  && window.location.hostname !== "localhost"
+  && window.location.hostname !== "127.0.0.1");
+
 const BACKEND = {
-  enabled: (typeof window !== "undefined" && window.location && typeof URLSearchParams !== "undefined" && (new URLSearchParams(window.location.search).get("backend") === "1" || (window.location.protocol && window.location.protocol.startsWith("http") && !window.location.hostname.includes("github.io")))) || store.get("backendEnabled", false),
-  baseUrl: store.get("apiBaseUrl", (typeof window !== "undefined" && window.location && window.location.origin && window.location.protocol && window.location.protocol.startsWith("http") && !window.location.hostname.includes("github.io")) ? window.location.origin : "http://localhost:5050"),
+  enabled: (typeof window !== "undefined" && window.location && typeof URLSearchParams !== "undefined" && new URLSearchParams(window.location.search).get("backend") === "1") || store.get("backendEnabled", SERVED_FROM_API),
+  baseUrl: store.get("apiBaseUrl", SERVED_FROM_API ? window.location.origin : "http://localhost:5050"),
   coopId: "kavre-veg"   // matches the seeded co-op every other sub-project uses
 };
 
@@ -1406,7 +1416,7 @@ function viewMine(){
         <p>${esc(T("मोबाइल वालेट नभएकाले नगद रोज्न सक्नुहुन्छ।","If you don't use a wallet, choose cash."))}</p></div></div>
     </div>
     ${renderAccountPanel()}
-    <button class="btn ghost" id="toggleBackendBtn" style="margin-top:6px">${BACKEND.enabled ? esc(T("🔌 सर्भर विच्छेद गर्नुहोस् (अफलाइन मोड)","🔌 Disconnect server (Offline mode)")) : esc(T("🔌 वास्तविक सर्भर जोड्नुहोस् (localhost:5050)","🔌 Connect to real API server (localhost:5050)"))}</button>
+    <button class="btn ghost" id="toggleBackendBtn" style="margin-top:6px">${BACKEND.enabled ? esc(T("🔌 सर्भर विच्छेद गर्नुहोस् (अफलाइन मोड)","🔌 Disconnect server (Offline mode)")) : esc(T("🔌 वास्तविक सर्भर जोड्नुहोस्","🔌 Connect to real API server"))}</button>
     <button class="btn ghost" id="resetBtn">${esc(T("नमुना डेटा मेटाउनुहोस्","Clear demo data"))}</button>
   </div>`;
 }
