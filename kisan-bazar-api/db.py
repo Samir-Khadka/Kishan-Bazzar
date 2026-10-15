@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS lot_listings (
 CREATE TABLE IF NOT EXISTS orders (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     buyer_name      TEXT NOT NULL,
+    buyer_phone     TEXT,
     lot_id          TEXT NOT NULL REFERENCES lots(id),
     quantity_kg     REAL NOT NULL,
     unit_rate       REAL NOT NULL,

@@ -303,6 +303,21 @@ select{
 .chatInputRow{display:flex; gap:8px; padding:10px; border-top:1px solid var(--line); background:var(--card); flex:0 0 auto}
 #chatInput{flex:1; border:1.5px solid var(--line); border-radius:99px; padding:10px 15px; font:600 14.5px "Mukta",sans-serif; background:var(--paper); color:var(--ink); min-width:0}
 #chatSend{background:var(--paddy); color:#fff; width:40px; height:40px; border-radius:50%; font-size:16px; flex:0 0 40px}
+.chatOnline{font-size:11px; font-weight:600; color:#BFE3C7; margin-left:auto; margin-right:10px}
+.chatOnline::before{content:"● "; color:#7CFC9A; font-size:9px}
+#chatMic,#chatVoice{background:var(--paper); border:1.5px solid var(--line); width:40px; height:40px; border-radius:50%; font-size:17px; flex:0 0 40px}
+#chatMic.listening{background:#fde8e8; border-color:#e05252; animation:pulse 1.1s infinite}
+#chatVoice.on{background:var(--paddy); border-color:var(--paddy)}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+.botBubble.typing{display:flex; gap:5px; align-items:center; padding:14px 16px}
+.botBubble.typing span{width:8px; height:8px; border-radius:50%; background:var(--ink-3); animation:tblink 1.2s infinite}
+.botBubble.typing span:nth-child(2){animation-delay:.2s}
+.botBubble.typing span:nth-child(3){animation-delay:.4s}
+@keyframes tblink{0%,60%,100%{opacity:.25; transform:translateY(0)}30%{opacity:1; transform:translateY(-4px)}}
+.chatCards{display:flex; flex-direction:column; gap:6px; margin:2px 0}
+.chatCard{display:flex; gap:10px; align-items:center; background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:10px 12px; font-size:13.5px}
+.chatCardIc{font-size:26px}
+.chatCardRate{font-weight:800; color:var(--paddy-deep); font-size:15px}
 
 /* ---------- Auth Modal & Admin Dashboard ---------- */
 .modalOverlay{
@@ -974,7 +989,52 @@ let scan = {
    kisan-bazar-assistant-notes.md for how a real LLM would slot in
    behind this for open-ended questions, on the backend only. */
 let sahayakSeen = store.get("sahayakSeen", false);
-let chat = { open: false, messages: [] };
+let chat = { open: false, messages: [], typing: false,
+  sessionId: store.get("chatSessionId", null), voiceOut: store.get("chatVoiceOut", false) };
+if(!chat.sessionId){
+  chat.sessionId = "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,9);
+  store.set("chatSessionId", chat.sessionId);
+}
+
+/* ---------- voice: speech-to-text (input) and text-to-speech (output) ----------
+   Uses the free Web Speech API built into browsers — no server, no API key.
+   ne-NP recognition is patchy on some devices, so we try ne-NP first and
+   fall back to en-US; the backend NLU understands Romanized Nepali anyway,
+   which is what most speech engines return for Nepali speech. */
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recog = null, listening = false;
+
+function toggleVoiceInput(){
+  if(!SpeechRec){ toast(T("यो ब्राउजरमा आवाज इनपुट छैन","Voice input not supported in this browser")); return; }
+  if(listening){ try{ recog.stop(); }catch(e){} return; }
+  recog = new SpeechRec();
+  recog.lang = L === "ne" ? "ne-NP" : "en-US";
+  recog.interimResults = false; recog.maxAlternatives = 1;
+  listening = true; render({skipScroll:true});
+  recog.onresult = e=>{
+    const heard = e.results[0][0].transcript;
+    listening = false;
+    sendChatMessage(heard);
+  };
+  recog.onerror = ()=>{ listening = false; render({skipScroll:true}); };
+  recog.onend = ()=>{ if(listening){ listening = false; render({skipScroll:true}); } };
+  try{ recog.start(); }catch(e){ listening = false; render({skipScroll:true}); }
+}
+
+function speakReply(text){
+  if(!chat.voiceOut || !("speechSynthesis" in window)) return;
+  try{
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text.replace(/[*_#]/g,"").slice(0, 400));
+    u.lang = L === "ne" ? "ne-NP" : "en-US";
+    u.rate = 0.95;
+    // prefer a Nepali voice when the device has one
+    const voices = speechSynthesis.getVoices();
+    const neVoice = voices.find(v=>v.lang && v.lang.toLowerCase().startsWith("ne"));
+    if(neVoice && L === "ne") u.voice = neVoice;
+    speechSynthesis.speak(u);
+  }catch(e){ /* TTS is enhancement-only */ }
+}
 
 const CROP_ALIASES = {
   tomato: ["golbheda","tamatar"],
@@ -1135,13 +1195,46 @@ function ensureGreeting(){
   }
 }
 
-function sendChatMessage(text){
+async function sendChatMessage(text){
   text = (text || "").trim();
-  if(!text) return;
+  if(!text || chat.typing) return;
   chat.messages.push({from:"user", text});
-  const reply = assistantReply(text);
-  chat.messages.push({from:"bot", text:reply.text, chips:reply.chips});
+  chat.typing = true;
   render({skipScroll:true});
+  scrollChatToBottom();
+
+  let reply = null;
+  // Prefer the backend NLU (trilingual, conversation memory, real DB data).
+  // Fall back to the local keyword matcher when offline or on error.
+  if(BACKEND.enabled){
+    try{
+      const headers = {"Content-Type":"application/json"};
+      if(account.token) headers["Authorization"] = "Bearer " + account.token;
+      const res = await fetch(`${BACKEND.baseUrl}/v1/assistant/chat`, {
+        method:"POST", headers,
+        body: JSON.stringify({message:text, session_id:chat.sessionId})
+      });
+      if(res.ok){
+        const d = await res.json();
+        reply = { text:d.reply, chips:d.chips, cards:d.cards };
+      }
+    }catch(e){ /* offline — fall through to local */ }
+  }
+  if(!reply){
+    const local = assistantReply(text);
+    reply = { text:local.text, chips:local.chips, cards:null };
+  }
+
+  chat.typing = false;
+  chat.messages.push({from:"bot", text:reply.text, chips:reply.chips, cards:reply.cards});
+  // keep the transcript short on-device
+  if(chat.messages.length > 40) chat.messages = chat.messages.slice(-40);
+  render({skipScroll:true});
+  scrollChatToBottom();
+  speakReply(reply.text);
+}
+
+function scrollChatToBottom(){
   try{
     const box = $("chatMsgs"); if(box) box.scrollTop = box.scrollHeight;
     const inp = $("chatInput"); if(inp){ inp.value = ""; inp.focus(); }
@@ -1160,20 +1253,52 @@ function renderSahayak(){
     const chips = (isLast && m.chips && m.chips.length)
       ? `<div class="chatChips">${m.chips.map(c=>`<button class="chip" data-chip="${esc(c)}">${esc(c)}</button>`).join("")}</div>`
       : "";
-    return `<div class="chatRow ${m.from}"><div class="${bubbleClass}">${esc(m.text)}</div></div>${chips}`;
+    const cards = (m.cards && m.cards.length)
+      ? `<div class="chatCards">${m.cards.map(renderChatCard).join("")}</div>`
+      : "";
+    // preserve line breaks in bot replies
+    const body = m.from === "bot" ? esc(m.text).replace(/\n/g,"<br>") : esc(m.text);
+    return `<div class="chatRow ${m.from}"><div class="${bubbleClass}">${body}</div></div>${cards}${chips}`;
   }).join("");
+
+  const typing = chat.typing
+    ? `<div class="chatRow bot"><div class="botBubble typing"><span></span><span></span><span></span></div></div>`
+    : "";
+
+  const micBtn = SpeechRec
+    ? `<button id="chatMic" class="${listening?"listening":""}" aria-label="${esc(T('बोलेर सोध्नुहोस्','Ask by voice'))}">${listening?"🔴":"🎤"}</button>`
+    : "";
+  const voiceBtn = ("speechSynthesis" in window)
+    ? `<button id="chatVoice" class="${chat.voiceOut?"on":""}" aria-label="${esc(T('जवाफ सुनाउने','Read replies aloud'))}" aria-pressed="${chat.voiceOut}">🔈</button>`
+    : "";
 
   return fab + `<div class="chatPanel" role="dialog" aria-label="${esc(T('किसान सहायक','Kisan Sahayak'))}">
     <div class="chatHeader">
       <span>🤖 ${esc(T('किसान सहायक','Kisan Sahayak'))}</span>
+      <span class="chatOnline">${esc(T('अनलाइन','online'))}</span>
       <button id="sahayakClose" aria-label="${esc(T('बन्द गर्नुहोस्','Close'))}">✕</button>
     </div>
-    <div class="chatMsgs" id="chatMsgs">${msgs}</div>
+    <div class="chatMsgs" id="chatMsgs">${msgs}${typing}</div>
     <div class="chatInputRow">
-      <input id="chatInput" placeholder="${esc(T('यहाँ लेख्नुहोस्...','Type here...'))}" autocomplete="off">
+      ${voiceBtn}${micBtn}
+      <input id="chatInput" placeholder="${esc(T('यहाँ लेख्नुहोस् वा 🎤 थिच्नुहोस्...','Type here or tap 🎤...'))}" autocomplete="off" ${chat.typing?"disabled":""}>
       <button id="chatSend" aria-label="${esc(T('पठाउनुहोस्','Send'))}">➤</button>
     </div>
   </div>`;
+}
+
+function renderChatCard(card){
+  if(!card) return "";
+  if(card.type === "price"){
+    const arrow = card.change > 0 ? "📈" : card.change < 0 ? "📉" : "➡️";
+    return `<div class="chatCard"><span class="chatCardIc">${esc(card.icon||"🌾")}</span>
+      <div><b>${esc(card.name)}</b><br><span class="chatCardRate">रू ${esc(String(card.rate))}/kg ${arrow}</span></div></div>`;
+  }
+  if(card.type === "weather"){
+    return `<div class="chatCard"><span class="chatCardIc">🌤️</span>
+      <div><b>${esc(card.today||"")}</b><br><span>${esc(card.advice||"")}</span></div></div>`;
+  }
+  return "";
 }
 function viewSell(){
   const list = ["tomato","cauliflower","potato","onion","ginger","pea","radish","maize","paddy","junar","apple","cardamom"];
@@ -1796,6 +1921,13 @@ document.addEventListener("click", e=>{
   if(t.id==="sahayakClose"){ chat.open=false; render({skipScroll:true}); return; }
   if(t.dataset.chip){ sendChatMessage(t.dataset.chip); return; }
   if(t.id==="chatSend"){ const inp=$("chatInput"); sendChatMessage(inp?inp.value:""); return; }
+  if(t.id==="chatMic"){ toggleVoiceInput(); return; }
+  if(t.id==="chatVoice"){
+    chat.voiceOut = !chat.voiceOut; store.set("chatVoiceOut", chat.voiceOut);
+    if(!chat.voiceOut){ try{ speechSynthesis.cancel(); }catch(e){} }
+    else speakReply(T("नमस्ते! अब म जवाफ सुनाउनेछु।","Hello! I'll read replies aloud now."));
+    render({skipScroll:true}); return;
+  }
 
   if(t.dataset.crop){ sell.crop = sell.crop===t.dataset.crop ? null : t.dataset.crop; render(); return; }
   if(t.dataset.kg){ sell.kg = Math.max(5, Math.min(2000, sell.kg + +t.dataset.kg)); render(); return; }

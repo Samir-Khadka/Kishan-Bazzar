@@ -112,16 +112,30 @@ def run():
 
     print("\n=== 9. Buyer orders 100kg from the lot ===")
     r = post(client, "/v1/orders", {
-        "buyer_name": "Himalayan Hostel Kathmandu", "lot_id": lot_id, "quantity_kg": 100,
+        "buyer_name": "Himalayan Hostel Kathmandu", "buyer_phone": "9841000001",
+        "lot_id": lot_id, "quantity_kg": 100,
     })
     assert r.status_code == 201, r.get_json()
     order = r.get_json()
     print(f"  order_id={order['order_id']}, total=Rs {order['total']}")
     assert order["total"] == 100 * 58, "order total should be quantity x confirmed rate"
 
+    print("\n=== 9b. Order without buyer_phone should fail ===")
+    r = post(client, "/v1/orders", {
+        "buyer_name": "No Phone", "lot_id": lot_id, "quantity_kg": 10,
+    })
+    assert r.status_code == 400, "buyer_phone is required"
+
+    print("\n=== 9c. Order with invalid phone should fail ===")
+    r = post(client, "/v1/orders", {
+        "buyer_name": "Bad Phone", "buyer_phone": "12345", "lot_id": lot_id, "quantity_kg": 10,
+    })
+    assert r.status_code == 400, "invalid phone should be rejected"
+
     print("\n=== 10. Over-ordering past the lot size should fail cleanly ===")
     r = post(client, "/v1/orders", {
-        "buyer_name": "Greedy Buyer", "lot_id": lot_id, "quantity_kg": 9999,
+        "buyer_name": "Greedy Buyer", "buyer_phone": "9841000002",
+        "lot_id": lot_id, "quantity_kg": 9999,
     })
     assert r.status_code == 400, "should reject an order larger than the lot"
     print(f"  PASS — rejected with {r.status_code}: {r.get_json()['error']}")

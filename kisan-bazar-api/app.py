@@ -39,11 +39,13 @@ Endpoints:
   GET  /v1/farmers/<phone>/land-scan/history  full history (auth required)
 """
 import os
+import re
 from functools import wraps
 from flask import Flask, request, jsonify, g, send_file
 import db
 import aggregation
 import auth
+import assistant
 
 app = Flask(__name__)
 
@@ -553,18 +555,24 @@ def land_scan_history(phone):
 
 @app.post("/v1/orders")
 def place_order():
-    # Deliberately NOT behind require_auth: buyers (hotels, hostels) are a
-    # separate identity class this prototype doesn't model login for yet.
-    # Left open, same as the original version — flagged here rather than
-    # silently left inconsistent with everything else, so it's a known,
-    # visible gap rather than an accidental one. See the security notes.
+    # Buyers (hotels, hostels) are a separate identity class this prototype
+    # doesn't model login for yet. Minimum viable protection: every order
+    # must carry a verifiable buyer phone number (traceable, SMS-confirmable)
+    # and the endpoint is rate-limited per IP against order-spam floods.
+    # Full buyer accounts with standing orders are the next step.
+    if not auth.check_rate_limit(f"order:{request.remote_addr}", max_attempts=10, window_seconds=600):
+        return jsonify({"error": "too many orders, try again later"}), 429
     body = request.get_json(force=True)
-    required = ["buyer_name", "lot_id", "quantity_kg"]
+    required = ["buyer_name", "buyer_phone", "lot_id", "quantity_kg"]
     missing = [f for f in required if f not in body]
     if missing:
         return jsonify({"error": f"missing fields: {missing}"}), 400
     if not valid_positive_kg(body["quantity_kg"]):
         return jsonify({"error": f"quantity_kg must be a number between 0 and {MAX_REASONABLE_KG}"}), 400
+    phone = str(body["buyer_phone"]).strip()
+    # Nepali mobiles: 98XXXXXXXX / 97XXXXXXXX (10 digits, NTC/Ncell)
+    if not re.fullmatch(r"9[678]\d{8}", phone):
+        return jsonify({"error": "buyer_phone must be a valid Nepali mobile number"}), 400
 
     conn = db.get_db()
     lot = conn.execute("SELECT * FROM lots WHERE id=?", (body["lot_id"],)).fetchone()
@@ -589,8 +597,8 @@ def place_order():
         return jsonify({"error": f"only {lot['pooled_kg'] - already_ordered} kg still available on this lot"}), 400
 
     cur = conn.execute(
-        "INSERT INTO orders (buyer_name, lot_id, quantity_kg, unit_rate) VALUES (?,?,?,?)",
-        (body["buyer_name"], body["lot_id"], body["quantity_kg"], lot["rate_per_kg"]),
+        "INSERT INTO orders (buyer_name, buyer_phone, lot_id, quantity_kg, unit_rate) VALUES (?,?,?,?,?)",
+        (body["buyer_name"], phone, body["lot_id"], body["quantity_kg"], lot["rate_per_kg"]),
     )
     conn.commit()
     order_id = cur.lastrowid
@@ -636,19 +644,50 @@ def admin_overview():
 
 
 # ---------------- AI advisor endpoint ----------------
-try:
-    import ai_advisor
-except ImportError:
-    from . import ai_advisor
+# Professional trilingual NLU engine (assistant.py) — Nepali (Devanagari),
+# Romanized Nepali, and English, with conversation context and real DB data.
+# (Replaces the old ai_advisor keyword matcher.)
+
 
 @app.post("/v1/assistant/chat")
 def assistant_chat():
+    """Conversational assistant.
+
+    Public endpoint (no auth needed for general questions). If the caller
+    passes a valid bearer <redacted>, ledger/order answers are personalized;
+    otherwise the assistant asks them to log in for those topics.
+    Rate-limited per IP to prevent abuse.
+    """
     body = request.get_json(force=True, silent=True) or {}
     message = (body.get("message") or "").strip()
-    zone = body.get("zone", "midhill")
-    land = body.get("land", "bari")
-    reply = ai_advisor.analyze_query(message, zone=zone, land=land)
-    return jsonify(reply)
+    session_id = (body.get("session_id") or request.remote_addr or "anon")[:64]
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+    if len(message) > 500:
+        return jsonify({"error": "message too long"}), 400
+
+    if not auth.check_rate_limit(f"assistant:{request.remote_addr}", max_attempts=30, window_seconds=60):
+        return jsonify({"error": "too many requests, slow down"}), 429
+
+    # Optional auth: personalize ledger/order answers when a token is given
+    farmer = None
+    authz = request.headers.get("Authorization", "")
+    if authz.startswith("Bearer "):
+        phone = auth.verify_token(authz[7:])
+        if phone:
+            conn = db.get_db()
+            row = conn.execute(
+                "SELECT phone, name, is_staff FROM farmers WHERE phone=?", (phone,)).fetchone()
+            conn.close()
+            if row:
+                farmer = dict(row)
+
+    conn = db.get_db()
+    try:
+        result = assistant.chat(session_id, message, db_conn=conn, farmer=farmer)
+    finally:
+        conn.close()
+    return jsonify(result)
 
 
 
