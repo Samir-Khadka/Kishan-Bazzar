@@ -882,13 +882,34 @@ const WEATHER = {
 };
 
 /* ---------- co-op lots for the buyer view ---------- */
-const LOTS = [
+const LOTS_DEMO = [
   {id:"KVR-118", crop:"cauliflower", coop:"काभ्रे तरकारी सहकारी", coopEn:"Kavre Vegetable Co-op", kg:410, rate:58, farmers:14, day:"बिहीबार", dayEn:"Thursday", dist:"धुलिखेल → काठमाडौँ", distEn:"Dhulikhel → Kathmandu"},
   {id:"DHD-207", crop:"tomato",      coop:"धादिङ कृषक समूह",     coopEn:"Dhading Farmer Group",  kg:260, rate:48, farmers:9,  day:"बुधबार",  dayEn:"Wednesday",dist:"गजुरी → काठमाडौँ",  distEn:"Gajuri → Kathmandu"},
   {id:"ILM-044", crop:"cardamom",    coop:"इलाम अलैँची सहकारी",  coopEn:"Ilam Cardamom Co-op",   kg:85,  rate:1490,farmers:21, day:"शनिबार",  dayEn:"Saturday", dist:"फिक्कल → विराटनगर",  distEn:"Fikkal → Biratnagar"},
   {id:"MST-012", crop:"apple",       coop:"मुस्ताङ स्याउ उत्पादक",coopEn:"Mustang Apple Growers", kg:540, rate:138, farmers:31, day:"आइतबार",  dayEn:"Sunday",   dist:"मार्फा → पोखरा",     distEn:"Marpha → Pokhara"},
   {id:"SND-091", crop:"junar",       coop:"सिन्धुली जुनार सहकारी",coopEn:"Sindhuli Junar Co-op",  kg:320, rate:95,  farmers:17, day:"शुक्रबार", dayEn:"Friday",   dist:"कमलामाई → काठमाडौँ", distEn:"Kamalamai → Kathmandu"}
 ];
+
+// Live lots from the backend when connected; demo data when offline.
+let LOTS = LOTS_DEMO.slice();
+let lotsLoaded = false;
+async function loadLots(){
+  if(!BACKEND.enabled || lotsLoaded) return;
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/lots`);
+    if(!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    // Backend lots: map to frontend shape. Only show ready lots.
+    const live = (Array.isArray(data) ? data : []).filter(l=>l.status==="ready").map(l=>({
+      id: l.id, crop: l.crop_code, coop: l.coop_name || "सहकारी", coopEn: l.coop_name_en || "Co-op",
+      kg: l.pooled_kg, rate: l.rate_per_kg, farmers: l.farmer_count || 0,
+      day: "बिहीबार", dayEn: "Thursday", dist: "", distEn: "",
+      _live: true
+    }));
+    if(live.length){ LOTS = live; }
+    lotsLoaded = true;
+  }catch(e){ /* stay on demo data */ }
+}
 
 /* ===================================================================
    render
@@ -1744,6 +1765,52 @@ function viewMarket(){
   </div>`;
 }
 
+async function doPlaceOrder(){
+  const rows = Object.entries(S.cart).filter(([id,q])=>q>0 && LOTS.some(x=>x.id===id));
+  if(!rows.length) return;
+
+  // Need buyer identity for the real API.
+  const buyerName = account.token && account.role==="buyer" ? account.name : null;
+  const buyerPhone = account.token && account.role==="buyer" ? account.phone : null;
+
+  if(!BACKEND.enabled){
+    // Offline demo: can't place real orders.
+    toast(T("अर्डर गर्न लगइन र इन्टरनेट चाहिन्छ","Login and internet needed to order"));
+    S.role = "farmer"; S.tab = "mine"; render();
+    return;
+  }
+  if(!buyerPhone){
+    toast(T("पहिले क्रेताको रूपमा लगइन गर्नुहोस्","Please log in as a buyer first"));
+    S.role = "farmer"; S.tab = "mine"; render();
+    return;
+  }
+
+  // Place one order per lot via the real API.
+  let ok = 0, failed = 0;
+  for(const [lotId, qty] of rows){
+    try{
+      const res = await fetch(`${BACKEND.baseUrl}/v1/orders`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          buyer_name: buyerName || "Buyer",
+          buyer_phone: buyerPhone,
+          lot_id: lotId,
+          quantity_kg: qty
+        })
+      });
+      if(res.ok) ok++; else failed++;
+    }catch(e){ failed++; }
+  }
+  if(ok){
+    S.cart = {}; S.tab = "market";
+    toast(T(`${ok} अर्डर पक्का भयो`, `${ok} order${ok>1?"s":""} confirmed`));
+  }else{
+    toast(T("अर्डर हुन सकेन — फेरि प्रयास गर्नुहोस्", "Order failed — try again"));
+  }
+  render();
+}
+
 function viewCart(){
   // Filter out stale cart entries (lot no longer exists) — a corrupt
   // localStorage cart must not crash the whole view.
@@ -2106,8 +2173,11 @@ document.addEventListener("click", e=>{
   if(t.id==="toggleBackendBtn"){
     BACKEND.enabled = !BACKEND.enabled;
     store.set("backendEnabled", BACKEND.enabled);
+    lotsLoaded = false;
+    if(!BACKEND.enabled) LOTS = LOTS_DEMO.slice();
     render({skipScroll:true});
     toast(BACKEND.enabled ? T("सर्भर सक्षम गरियो","API backend enabled") : T("स्थानीय मोड","Local-only mode"));
+    if(BACKEND.enabled) loadLots().then(()=>render({skipScroll:true}));
     return;
   }
 
@@ -2171,7 +2241,7 @@ document.addEventListener("click", e=>{
     S.cart[id]=Math.max(0, Math.min(l.kg, (S.cart[id]||0) + (+t.dataset.d)));
     render(); return;
   }
-  if(t.id==="orderBtn"){ S.cart={}; S.tab="market"; render(); toast(T("अर्डर पक्का भयो","Order confirmed")); return; }
+  if(t.id==="orderBtn"){ doPlaceOrder(); return; }
   if(t.id==="lotBtn"){ toast(T("लट KVR-११९ बन्यो · ४ किसान","Lot KVR-119 formed · 4 farmers")); return; }
   if(t.id==="resetBtn"){
     S.offers=[]; S.cart={}; render(); toast(T("मेटियो","Cleared")); return;
@@ -2231,6 +2301,7 @@ document.addEventListener("change", e=>{
 });
 
 render();
+loadLots().then(()=>{ if(S.role==="buyer") render({skipScroll:true}); });
 </script>
 </body>
 </html>
