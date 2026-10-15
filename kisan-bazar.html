@@ -93,6 +93,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
   padding:5px 11px; font-size:13px; font-weight:600; color:#F2F7F0;
 }
 .chipbtn[aria-pressed="true"]{background:var(--tori);border-color:var(--tori);color:#241C00}
+.langSeg{display:flex; border:1px solid rgba(255,255,255,.28); border-radius:99px; overflow:hidden}
+.langSeg button{padding:5px 10px; font-size:13px; font-weight:700; color:#F2F7F0; opacity:.65}
+.langSeg button.on{background:var(--tori); color:#241C00; opacity:1}
 
 .roles{display:flex;gap:6px;position:relative;z-index:1;padding:12px 0 18px}
 .role{
@@ -300,8 +303,9 @@ select{
 .chatRow.user{justify-content:flex-end}
 .botBubble{background:var(--paper); border:1px solid var(--line); border-radius:14px 14px 14px 4px; padding:10px 13px; max-width:85%; font-size:14.5px; line-height:1.5}
 .userBubble{background:var(--paddy); color:#fff; border-radius:14px 14px 4px 14px; padding:10px 13px; max-width:85%; font-size:14.5px; line-height:1.5}
-.chatChips{display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 2px 2px}
-.chip{background:var(--card); border:1.3px solid var(--paddy); color:var(--paddy); border-radius:99px; padding:7px 13px; font-size:12.5px; font-weight:700}
+.chatChips{display:flex; gap:6px; margin:4px 0; overflow-x:auto; padding-bottom:4px; scrollbar-width:none}
+.chatChips::-webkit-scrollbar{display:none}
+.chip{background:var(--card); border:1.3px solid var(--paddy); color:var(--paddy); border-radius:99px; padding:7px 13px; font-size:12.5px; font-weight:700; white-space:nowrap; flex:0 0 auto}
 .chatInputRow{display:flex; gap:8px; padding:10px; border-top:1px solid var(--line); background:var(--card); flex:0 0 auto}
 #chatInput{flex:1; border:1.5px solid var(--line); border-radius:99px; padding:10px 15px; font:600 14.5px "Mukta",sans-serif; background:var(--paper); color:var(--ink); min-width:0}
 #chatSend{background:var(--paddy); color:#fff; width:40px; height:40px; border-radius:50%; font-size:16px; flex:0 0 40px}
@@ -364,7 +368,10 @@ select{
       <div class="brand" id="brandBox"></div>
       <div class="top-actions" style="display:flex;gap:6px;align-items:center">
         <button class="chipbtn" id="authBtn" style="font-weight:700">👤 लगइन</button>
-        <button class="chipbtn" id="langBtn" aria-pressed="true">नेपाली</button>
+        <div class="langSeg" role="group" aria-label="Language / भाषा">
+          <button id="langNe" aria-pressed="true">ने</button>
+          <button id="langEn" aria-pressed="false">EN</button>
+        </div>
       </div>
     </div>
     <div class="roles" role="tablist" id="roles"></div>
@@ -405,8 +412,8 @@ const S = {
   zone: store.get("zone","midhill"),
   land: store.get("land","bari"),
   offers: store.get("offers", [
-    {id:1, crop:"cauliflower", kg:40, grade:"A", status:"lot", lot:"KVR-118", rate:52, day:"आज"},
-    {id:2, crop:"tomato",      kg:25, grade:"B", status:"paid", lot:"KVR-114", rate:41, day:"गत हप्ता"}
+    {id:1, crop:"cauliflower", kg:40, grade:"A", status:"lot", lot:"KVR-118", rate:52, day:"today"},
+    {id:2, crop:"tomato",      kg:25, grade:"B", status:"paid", lot:"KVR-114", rate:41, day:"last_week"}
   ]),
   cart: store.get("cart", {})
 };
@@ -902,7 +909,9 @@ function speak(text){
 
 function header(){
   $("brandBox").innerHTML = `किसान बजार<small>KISAN BAZAR · ${esc(BS_MONTHS[BS_NOW])} ${esc(N(BS_YEAR))}</small>`;
-  $("langBtn").textContent = L==="ne" ? "नेपाली" : "English";
+  const ln = $("langNe"), le = $("langEn");
+  if(ln){ ln.classList.toggle("on", L==="ne"); ln.setAttribute("aria-pressed", L==="ne"); }
+  if(le){ le.classList.toggle("on", L==="en"); le.setAttribute("aria-pressed", L==="en"); }
   const authBtn = $("authBtn");
   if(authBtn){
     if(account.token){
@@ -1008,7 +1017,7 @@ function offerRow(o){
                    : "";
   return `<div class="item"><div class="em" aria-hidden="true">${c.ic}</div>
     <div class="bd"><b>${esc(T(c.ne,c.en))} · ${esc(N(o.kg))} ${esc(T("के.जी.","kg"))}</b>
-      <p>${esc(T("श्रेणी","Grade"))} ${esc(o.grade)} · ${esc(T(o.day,o.day))}</p>
+      <p>${esc(T("श्रेणी","Grade"))} ${esc(o.grade)} · ${esc(o.day==="today"?T("आज","Today"):o.day==="last_week"?T("गत हप्ता","Last week"):o.day)}</p>
       <span class="tag ${st[0]}">${esc(st[1])}</span>${syncBadge}</div>
     <div class="money">${esc(money(o.kg*o.rate))}</div></div>`;
 }
@@ -1988,7 +1997,7 @@ document.addEventListener("click", e=>{
   const t = e.target.closest("button");
   if(!t) return;
 
-  if(t.id==="langBtn"){ L = L==="ne"?"en":"ne"; store.set("lang",L); render(); return; }
+  if(t.id==="langNe" || t.id==="langEn"){ L = t.id==="langNe"?"ne":"en"; store.set("lang",L); render(); return; }
   if(t.id==="authBtn"){
     // Header login button: jump to the Mine tab where the login UI lives.
     // (There is no separate modal; the Mine tab hosts phone/OTP login.)
