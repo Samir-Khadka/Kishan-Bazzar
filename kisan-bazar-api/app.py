@@ -65,6 +65,34 @@ MAX_REASONABLE_KG = 5000
 DEMO_MODE = os.environ.get("KISAN_BAZAR_DEMO_MODE", "").lower() in ("1", "true", "yes")
 
 
+# ---------------- startup: ensure schema + demo seed ----------------
+# This lives in app.py (not just wsgi.py) so the database is ready no
+# matter how the app is launched: gunicorn app:app, gunicorn wsgi:app,
+# flask run, etc. A file lock stops two gunicorn workers from racing here
+# at startup — seed.seed() does init_db(fresh=True), which unlinks the DB
+# file, so an unguarded race corrupts the database and 500s every request.
+def _ensure_db_ready():
+    import fcntl
+
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".seed.lock")
+    with open(lock_path, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            db.init_db()
+            conn = db.get_db()
+            coops = conn.execute("SELECT COUNT(*) AS n FROM cooperatives").fetchone()["n"]
+            conn.close()
+            if coops == 0:
+                import seed
+
+                seed.seed()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+_ensure_db_ready()
+
+
 # ---------------- error handling: never leak internals ----------------
 @app.errorhandler(Exception)
 def handle_unexpected_error(e):
