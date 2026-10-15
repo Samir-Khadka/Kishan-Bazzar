@@ -117,5 +117,19 @@ check("endpoint rejects empty", resp.status_code == 400)
 resp = client.post("/v1/assistant/chat", json={"message": "x" * 501, "session_id": "e2e4"})
 check("endpoint rejects too-long", resp.status_code == 400)
 
+# --- agronomy intent ---
+check("agronomy pest ne", intent_of("गोलभेँडामा डढुवा रोग लाग्यो") == "agronomy")
+check("agronomy fert ro", intent_of("aaluma kun mal halne?") == "agronomy")
+check("agronomy en", intent_of("tomato blight treatment") == "agronomy")
+
+r = assistant.chat("ag1", "गोलभेँडामा डढुवा रोग", db_conn=_conn)
+check("agronomy pest reply", r["intent"] == "agronomy" and "डढुवा" in r["reply"])
+
+r = assistant.chat("ag2", "kaulima kun mal halne?")
+check("agronomy fert reply", r["intent"] == "agronomy")
+
+r = assistant.chat("ag3", "mal ko barema")
+check("agronomy asks crop", r["intent"] == "agronomy" and len(r["chips"]) > 0)
+
 print(f"\n{passed} passed, {failed} failed.")
 sys.exit(1 if failed else 0)

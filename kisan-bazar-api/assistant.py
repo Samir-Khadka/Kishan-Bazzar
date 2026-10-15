@@ -30,6 +30,17 @@ import re
 import time
 from collections import defaultdict
 
+# Agronomic knowledge (pest/disease remedies, fertilizer schedules, sowing
+# windows) lives in ai_advisor.py — imported here so the chat NLU can serve
+# it directly instead of the frontend calling a second endpoint.
+try:
+    from ai_advisor import CROPS_INFO as _AGRO
+except ImportError:
+    try:
+        from .ai_advisor import CROPS_INFO as _AGRO
+    except ImportError:
+        _AGRO = {}
+
 # ---------------------------------------------------------------------------
 # Crop knowledge — 16 crops, three scripts each
 # ---------------------------------------------------------------------------
@@ -207,6 +218,16 @@ INTENTS = {
     "help": [
         ("सहयोग", 3), ("मद्दत", 3), ("help", 3), ("madad", 3),
         ("what can you do", 4), ("के गर्न सक्छौ", 4),
+    ],
+    "agronomy": [
+        ("रोग", 3), ("कीरा", 3), ("डढुवा", 4), ("कुहिने", 3), ("पहेंलो", 2),
+        ("disease", 3), ("pest", 3), ("blight", 4), ("rot", 2), ("curl", 2),
+        ("rog", 3), ("keera", 3), ("kira", 3), ("khumre", 3), ("lahi", 3),
+        ("मल", 3), ("युरिया", 4), ("डिएपी", 4), ("पोटास", 4), ("कम्पोस्ट", 3),
+        ("गोबर", 3), ("fertilizer", 3), ("urea", 4), ("dap", 3),
+        ("potash", 3), ("manure", 3), ("mal", 2),
+        ("रोप्ने समय", 3), ("sowing", 3), ("कहिले रोप्ने", 4),
+        ("उपचार", 2), ("treatment", 2), ("बिरामी", 2),
     ],
 }
 
@@ -495,6 +516,49 @@ def _scan(_t, lang, _c, _ctx, _db, _farmer, _conf):
           "📷 In the Advice tab tap 'Scan by photo' — it estimates your land type from a soil photo and two questions.", lang))
 
 
+def _agronomy(text, lang, crops, _ctx, _db, _farmer, _conf):
+    """Pest/disease/fertilizer/sowing advice from the curated knowledge base."""
+    lower = text.lower()
+    is_pest = any(w in lower for w in
+                  ["रोग", "कीरा", "डढुवा", "कुहिने", "disease", "pest", "blight",
+                   "rog", "keera", "kira", "khumre", "lahi", "उपचार"])
+    # map assistant crop codes to ai_advisor keys (same lowercase names)
+    agro = None
+    if crops:
+        agro = _AGRO.get(crops[0])
+    if not agro and crops:
+        # try matching by nepali/english name
+        for key, info in _AGRO.items():
+            ne, en, _al, _ic = CROPS.get(crops[0], ("", "", [], ""))
+            if info.get("ne") == ne or info.get("en", "").lower() == en.lower():
+                agro = info
+                break
+    if agro:
+        ne_name = agro.get("ne", "")
+        if is_pest:
+            pests = "\n".join(f"• {v}" for v in agro.get("pests", {}).values())
+            body = T(f"🌿 {ne_name} का मुख्य रोग र उपचार:\n\n{pests}\n\n💡 रासायनिक विषादीभन्दा पहिले नीमको तेल वा ट्राइकोडर्मा जस्ता जैविक उपाय अपनाउनुहोस्।",
+                     f"🌿 {agro.get('en','')} pest/disease remedies:\n\n{pests}",
+                     f"🌿 {agro.get('en','')} pest/disease remedies:\n\n{pests}", lang)
+        else:
+            fert = agro.get("fertilizer", "")
+            sow = agro.get("sow", "")
+            body = T(f"🌱 {ne_name}:\n\nमलखाद: {fert}\n\nरोप्ने समय: {sow}",
+                     f"🌱 {agro.get('en','')}:\n\nFertilizer: {fert}\n\nSowing: {sow}",
+                     f"🌱 {agro.get('en','')}:\n\nFertilizer: {fert}\n\nSowing: {sow}", lang)
+        return _resp(body, chips=[
+            T("अर्को बाली", "Arko bali", "Another crop", lang),
+            T("आजको भाउ", "Aajako bhau", "Today's rates", lang)])
+    # no crop identified — ask which one
+    return _resp(
+        T("कुन बालीमा समस्या छ? जस्तै: गोलभेँडामा डढुवा, काउलीमा लाही कीरा।",
+          "Kun balima samasya chha? Jastai: golbhedama dadhua, kaulima lahi kira.",
+          "Which crop has the problem? For example: tomato blight, cauliflower aphids.", lang),
+        chips=[T("गोलभेँडा", "Golbheda", "Tomato", lang),
+               T("काउली", "Kauli", "Cauliflower", lang),
+               T("आलु", "Aalu", "Potato", lang)])
+
+
 def _thanks(_t, lang, _c, _ctx, _db, _farmer, _conf):
     return _resp(
         T("खुसी लाग्यो! 🙏 अरू केही सोध्नु छ?",
@@ -531,4 +595,5 @@ _HANDLERS = {
     "greeting": _greeting, "price": _price, "weather": _weather,
     "sell": _sell, "plant": _plant, "ledger": _ledger, "order": _order,
     "scan": _scan, "thanks": _thanks, "bye": _bye, "help": _help,
+    "agronomy": _agronomy,
 }
