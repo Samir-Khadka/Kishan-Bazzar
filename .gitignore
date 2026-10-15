@@ -45,3 +45,4 @@ desktop.ini
 /tmp/
 *.log
 kisan_test_outbox.jsonl
+.seed.lock
