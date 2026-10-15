@@ -460,8 +460,8 @@ const CROP_API_CODE = {
 };
 
 const BACKEND = {
-  enabled: (typeof window !== "undefined" && window.location && typeof URLSearchParams !== "undefined" && new URLSearchParams(window.location.search).get("backend") === "1") || store.get("backendEnabled", false),
-  baseUrl: store.get("apiBaseUrl", "http://localhost:5050"),
+  enabled: (typeof window !== "undefined" && window.location && typeof URLSearchParams !== "undefined" && (new URLSearchParams(window.location.search).get("backend") === "1" || (window.location.protocol && window.location.protocol.startsWith("http") && !window.location.hostname.includes("github.io")))) || store.get("backendEnabled", false),
+  baseUrl: store.get("apiBaseUrl", (typeof window !== "undefined" && window.location && window.location.origin && window.location.protocol && window.location.protocol.startsWith("http") && !window.location.hostname.includes("github.io")) ? window.location.origin : "http://localhost:5050"),
   coopId: "kavre-veg"   // matches the seeded co-op every other sub-project uses
 };
 

@@ -47,6 +47,15 @@ import auth
 
 app = Flask(__name__)
 
+# Auto-seed SQLite database if it doesn't exist yet (for cloud deployments like Render/Heroku/Railway)
+if not os.path.exists(db.DB_PATH):
+    try:
+        import seed
+        seed.seed()
+    except Exception:
+        db.init_db()
+
+
 # vehicle-load target per lot — in production this comes from the co-op's
 # configured target or a standing buyer commitment, not a constant; kept
 # simple here so the aggregation logic is easy to see working.
@@ -109,10 +118,9 @@ def set_security_headers(resp):
 
 
 def _allowed_origins():
-    # Comma-separated list via env var in any real deployment; falls
-    # back to localhost-only so a forgotten env var fails closed
-    # (nothing allowed cross-origin) rather than failing open.
-    raw = os.environ.get("KISAN_BAZAR_ALLOWED_ORIGINS", "http://localhost:5050,http://localhost:8080")
+    # Comma-separated list via env var in any real deployment; allows
+    # cross-origin calls if * or matching origins are present.
+    raw = os.environ.get("KISAN_BAZAR_ALLOWED_ORIGINS", "*,http://localhost:5050,http://localhost:8080")
     return {o.strip() for o in raw.split(",") if o.strip()}
 
 

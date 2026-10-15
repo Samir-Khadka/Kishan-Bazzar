@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: kisan-bazar
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --chdir kisan-bazar-api app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: KISAN_BAZAR_ALLOWED_ORIGINS
+        value: "*"
