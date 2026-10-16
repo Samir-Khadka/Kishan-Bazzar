@@ -385,6 +385,39 @@ def dev_latest_code(phone):
 
 
 @app.post("/v1/auth/verify")
+
+
+@app.post("/v1/auth/admin")
+def admin_login():
+    """Password login for the site owner/admin. Separate from the OTP flow
+    that farmers/buyers use — the admin needs direct access without waiting
+    for an SMS. Credentials come from env vars (never hardcoded); in demo
+    mode a default is used. Returns a staff JWT that unlocks the admin panel."""
+    import hashlib, hmac
+    body = request.get_json(force=True, silent=True) or {}
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    expected_user = os.environ.get("KISAN_ADMIN_USER", "admin" if DEMO_MODE else "")
+    expected_pass = os.environ.get("KISAN_ADMIN_PASS", "kisan123" if DEMO_MODE else "")
+    if not expected_user or not hmac.compare_digest(username, expected_user):
+        return jsonify({"error": "invalid credentials"}), 401
+    # Compare password hashes to avoid timing leaks on the raw value.
+    pw_hash = hashlib.sha256(password.encode()).hexdigest()
+    exp_hash = hashlib.sha256(expected_pass.encode()).hexdigest()
+    if not hmac.compare_digest(pw_hash, exp_hash):
+        return jsonify({"error": "invalid credentials"}), 401
+    # Mint a staff token for the admin phone (created in seed).
+    # issue_token embeds the phone; role=staff is read from the DB.
+    conn = db.get_db()
+    row = conn.execute("SELECT phone, name, role FROM farmers WHERE phone='9801100000'").fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "admin account not set up"}), 500
+    token = auth.issue_token(row["phone"])
+    return jsonify({
+        "token": token, "phone": row["phone"], "name": row["name"],
+        "role": row["role"],
+    })
 def verify():
     body = request.get_json(force=True, silent=True) or {}
     phone = body.get("phone")

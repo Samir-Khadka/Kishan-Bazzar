@@ -1471,6 +1471,24 @@ function renderAuthModal(){
         <div style="display:flex;flex-wrap:wrap;gap:6px">
           ${DEMO_ACCOUNTS.map((a,i)=>`<button class="chipbtn" style="font-size:13px" onclick="useDemoAccount(${i})">${a.icon} ${esc(a.name.split(" ")[0])}</button>`).join("")}
         </div>
+        <div style="margin-top:10px;text-align:center">
+          <button onclick="account.loginStep='admin';render()" style="background:none;border:none;color:var(--ink-2);font-size:13px;text-decoration:underline;cursor:pointer">${esc(T("🔐 प्रशासक लगइन","🔐 Admin login"))}</button>
+        </div>
+      </div>`;
+  } else if(step === "admin"){
+    body = `
+      <p class="muted" style="margin-bottom:14px">${esc(T("साइट प्रशासकका लागि — प्रयोगकर्ता, लट र भाउ व्यवस्थापन।","For the site administrator — manage users, lots, and prices."))}</p>
+      <label style="font-weight:600;font-size:14px">${esc(T("प्रयोगकर्ता नाम","Username"))}</label>
+      <input id="admin-user" type="text" autocomplete="username" placeholder="admin"
+        style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin:6px 0 12px">
+      <label style="font-weight:600;font-size:14px">${esc(T("पासवर्ड","Password"))}</label>
+      <input id="admin-pass" type="password" autocomplete="current-password" placeholder="••••••••"
+        style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin:6px 0 12px">
+      ${account.lastError?`<p style="color:var(--alert);font-size:14px;margin-bottom:10px">${esc(account.lastError)}</p>`:""}
+      <button class="btn primary" style="width:100%;padding:13px" onclick="doAdminLogin()" ${account.busy?"disabled":""}>
+        ${account.busy?esc(T("लगइन हुँदै…","Logging in…")):esc(T("प्रशासक लगइन","Admin login"))}</button>
+      <div style="margin-top:10px;text-align:center">
+        <button onclick="account.loginStep='phone';account.lastError=null;render()" style="background:none;border:none;color:var(--ink-2);font-size:13px;text-decoration:underline;cursor:pointer">${esc(T("← फर्कनुहोस्","← Back"))}</button>
       </div>`;
   } else if(step === "code_sent"){
     body = `
@@ -1510,6 +1528,33 @@ async function doAuthRequestCode(){
   const phone = ($("auth-phone")||{}).value || "";
   account.pendingRole = account.pendingRole || "farmer";
   await doRequestCode(phone);
+}
+
+async function doAdminLogin(){
+  const username = (($("admin-user")||{}).value || "").trim();
+  const password = ($("admin-pass")||{}).value || "";
+  if(!username || !password){ account.lastError = T("प्रयोगकर्ता नाम र पासवर्ड चाहिन्छ","Username and password required"); render(); return; }
+  account.busy = true; account.lastError = null; render();
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/auth/admin`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({username, password})
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || "login failed");
+    // Staff token unlocks the admin panel.
+    account.token = data.token; account.phone = data.phone;
+    account.name = data.name; account.role = "staff";
+    account.showAuth = false; account.loginStep = "phone"; account.lastError = null;
+    store.set("token", data.token); store.set("phone", data.phone);
+    store.set("name", data.name); store.set("role", "staff");
+    S.role = "admin"; S.tab = "admin_overview";
+    toast(T("प्रशासकको रूपमा लगइन भयो","Logged in as admin"));
+  }catch(e){
+    account.lastError = T("लगइन असफल — विवरण जाँच्नुहोस्","Login failed — check your details");
+  }
+  account.busy = false; render();
 }
 async function doAuthVerifyCode(){
   const code = (($("auth-code")||{}).value || "").trim();
