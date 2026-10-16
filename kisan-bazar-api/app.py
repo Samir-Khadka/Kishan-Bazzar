@@ -88,6 +88,25 @@ def _ensure_db_ready():
                 import seed
 
                 seed.seed()
+            else:
+                # Migration: add demo lots if the lots table is empty
+                # (seed didn't create lots before 2026-10-16).
+                conn = db.get_db()
+                lot_count = conn.execute("SELECT COUNT(*) AS n FROM lots").fetchone()["n"]
+                if lot_count == 0:
+                    lots = [
+                        ("KVR-118", "kavre-veg", "KAULI", "A", 500, 410, 58, "ready"),
+                        ("DHD-207", "kavre-veg", "GOLB", "A", 350, 300, 48, "ready"),
+                        ("ILM-044", "kavre-veg", "ALAICHI", "A", 30, 25, 1450, "ready"),
+                        ("MST-012", "kavre-veg", "SYAU", "A", 200, 150, 138, "ready"),
+                        ("SND-091", "kavre-veg", "JUNAR", "B", 250, 200, 95, "ready"),
+                    ]
+                    conn.executemany(
+                        "INSERT INTO lots (id, coop_id, crop_code, grade, target_kg, pooled_kg, rate_per_kg, status) "
+                        "VALUES (?,?,?,?,?,?,?,?)", lots
+                    )
+                    conn.commit()
+                conn.close()
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
 

@@ -70,9 +70,22 @@ def seed():
         "VALUES (?,?,?,?,?,?,?)", rentals
     )
 
+    # Demo lots — ready for buyers, matching the frontend demo data shape
+    lots = [
+        ("KVR-118", "kavre-veg", "KAULI", "A", 500, 410, 58, "ready"),
+        ("DHD-207", "kavre-veg", "GOLB", "A", 350, 300, 48, "ready"),
+        ("ILM-044", "kavre-veg", "ALAICHI", "A", 30, 25, 1450, "ready"),
+        ("MST-012", "kavre-veg", "SYAU", "A", 200, 150, 138, "ready"),
+        ("SND-091", "kavre-veg", "JUNAR", "B", 250, 200, 95, "ready"),
+    ]
+    conn.executemany(
+        "INSERT INTO lots (id, coop_id, crop_code, grade, target_kg, pooled_kg, rate_per_kg, status) "
+        "VALUES (?,?,?,?,?,?,?,?)", lots
+    )
+
     conn.commit()
     conn.close()
-    print("Seeded: 1 co-op, 5 farmers (1 out of collection radius), 1 staff account, 16 crops, 4 rentals.")
+    print("Seeded: 1 co-op, 5 farmers (1 out of collection radius), 1 staff account, 16 crops, 4 rentals, 5 lots.")
 
 
 if __name__ == "__main__":
