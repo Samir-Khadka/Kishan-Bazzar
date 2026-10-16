@@ -102,11 +102,13 @@ a:hover{text-decoration:underline}
   .main-nav.open{display:flex}
   .menu-btn{display:block; margin-left:auto}
   .header-cta{margin-left:0}
-  .header-cta .btn-primary{display:none}
+  .header-cta .btn-primary{padding:8px 14px; font-size:14px}
   .hero-in{flex-direction:column; text-align:center}
   .hero-ctas{justify-content:center}
-  .hero-stats{justify-content:center}
+  .hero-stats{justify-content:center; flex-wrap:wrap; gap:20px}
   .hero-art{font-size:72px}
   .cards3{grid-template-columns:1fr}
   .footer-in{grid-template-columns:1fr 1fr}
 }
+.empty{text-align:center; padding:48px 20px; color:var(--muted)}
+.empty p{margin-bottom:16px}

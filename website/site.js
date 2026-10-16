@@ -12,6 +12,11 @@ function applyLang(){
   document.querySelectorAll("[data-ne]").forEach(el=>{
     el.textContent = el.dataset[LANG === "ne" ? "ne" : "en"];
   });
+  // Re-render dynamic lot cards so they follow the language toggle
+  const ml = document.getElementById("market-lots");
+  if(ml) loadMarketLots(ml);
+  const lp = document.getElementById("lot-preview");
+  if(lp) loadLotPreview();
 }
 document.addEventListener("DOMContentLoaded", ()=>{
   applyLang();
@@ -50,11 +55,18 @@ function lotCard(l){
 
 async function loadStats(){
   try{
-    const [lots] = await Promise.all([api("/v1/lots").catch(()=>[])]);
-    const ready = (lots||[]).filter(l=>l.status==="ready");
-    set("stat-lots", ready.length);
-    set("stat-farmers", "500+");
-    set("stat-coops", "12+");
+    const s = await api("/v1/stats").catch(()=>null);
+    if(!s) return;
+    // Show real numbers only; hide a stat rather than show a sad "0"
+    const show = (id, v) => {
+      const el = document.getElementById(id);
+      if(!el) return;
+      if(v > 0) el.textContent = v;
+      else el.parentElement.style.display = "none";
+    };
+    show("stat-lots", s.active_lots);
+    show("stat-farmers", s.farmers);
+    show("stat-coops", s.coops);
   }catch(e){}
 }
 function set(id, v){ const el = document.getElementById(id); if(el) el.textContent = v; }
@@ -77,7 +89,10 @@ async function loadMarketLots(box){
     const lots = await api("/v1/lots");
     const ready = (lots||[]).filter(l=>l.status==="ready");
     box.innerHTML = ready.length ? ready.map(lotCard).join("")
-      : `<p class="muted">${LANG==="ne"?"अहिले कुनै लट छैन।":"No lots right now."}</p>`;
+      : `<div class="empty">
+          <p>${LANG==="ne"?"अहिले कुनै लट छैन। सहकारीले नयाँ लट बनाउँदा यहाँ देखिन्छ।":"No lots right now. New lots appear here as co-ops form them."}</p>
+          <a href="/" class="btn-primary" data-ne="एपमा हेर्नुहोस्" data-en="Check the app">${LANG==="ne"?"एपमा हेर्नुहोस्":"Check the app"}</a>
+        </div>`;
   }catch(e){
     box.innerHTML = `<p class="muted">${LANG==="ne"?"लोड हुन सकेन।":"Could not load."}</p>`;
   }

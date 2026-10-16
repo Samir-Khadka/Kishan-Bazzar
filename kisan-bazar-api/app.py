@@ -1000,6 +1000,17 @@ def latest_prices():
     return jsonify(seen)
 
 
+@app.get("/v1/stats")
+def public_stats():
+    """Public aggregate stats for the website. No PII, no auth."""
+    conn = db.get_db()
+    farmers = conn.execute("SELECT COUNT(*) as c FROM farmers WHERE is_staff=0").fetchone()["c"]
+    coops = conn.execute("SELECT COUNT(*) as c FROM cooperatives").fetchone()["c"]
+    lots = conn.execute("SELECT COUNT(*) as c FROM lots WHERE status='ready'").fetchone()["c"]
+    conn.close()
+    return jsonify({"farmers": farmers, "coops": coops, "active_lots": lots})
+
+
 # ---------------- admin endpoints ----------------
 
 @app.get("/v1/me")

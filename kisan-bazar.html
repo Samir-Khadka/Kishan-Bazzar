@@ -141,8 +141,8 @@ h2.sec:first-child{margin-top:4px}
 .fc{display:flex;gap:7px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
 .fc::-webkit-scrollbar{height:0}
 .fcd{
-  flex:0 0 76px;background:var(--card);border:1px solid var(--line);
-  border-radius:var(--radius-sm);padding:9px 6px;text-align:center;
+  flex:1 0 0; min-width:62px; background:var(--card);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:9px 4px;text-align:center;
 }
 .fcd b{display:block;font-size:13px;font-weight:600;color:var(--ink-2)}
 .fcd .ic{font-size:24px;line-height:1.4}
@@ -436,9 +436,9 @@ const ZONES = [
 ];
 const LANDS = [
   {id:"khet", ne:"खेत", en:"Irrigated khet", hint:"सिँचाइ छ, पानी जम्छ", hintEn:"Irrigated, holds water", ic:"💧"},
-  {id:"bari", ne:"बारी", en:"Rain-fed bari", hint:"आकाशे पानी मात्र",   hintEn:"Rain-fed upland",      ic:"🟫"},
-  {id:"pakho",ne:"पाखो", en:"Sloped pakho", hint:"भिरालो, पानी बग्छ",  hintEn:"Sloped, drains fast",  ic:"📐"},
-  {id:"balaute",ne:"बलौटे",en:"Sandy",      hint:"बालुवा मिसिएको",     hintEn:"Sandy, light soil",    ic:"🏖️"}
+  {id:"bari", ne:"बारी", en:"Rain-fed bari", hint:"आकाशे पानी मात्र",   hintEn:"Rain-fed upland",      ic:"🌾"},
+  {id:"pakho",ne:"पाखो", en:"Sloped pakho", hint:"भिरालो, पानी बग्छ",  hintEn:"Sloped, drains fast",  ic:"⛰️"},
+  {id:"balaute",ne:"बलौटे",en:"Sandy balaute",hint:"बालुवा मिसिएको",     hintEn:"Sandy, light soil",    ic:"🟨"}
 ];
 
 /* ---------- crops ---------- */
@@ -453,12 +453,12 @@ const CROPS = {
   mustard:    {ne:"तोरी",        en:"Mustard",      ic:"🌼", rate:118, chg:0},
   lentil:     {ne:"मुसुरो",      en:"Lentil",       ic:"🫘", rate:145, chg:+5},
   ginger:     {ne:"अदुवा",       en:"Ginger",       ic:"🫚", rate:120, chg:-8},
-  cardamom:   {ne:"अलैँची",      en:"Cardamom",     ic:"🟤", rate:1450,chg:+40},
+  cardamom:   {ne:"अलैँची",      en:"Cardamom",     ic:"🌰", rate:1450,chg:+40},
   junar:      {ne:"जुनार",       en:"Junar",        ic:"🍊", rate:88,  chg:+6},
   apple:      {ne:"स्याउ",       en:"Apple",        ic:"🍎", rate:132, chg:+10},
   buckwheat:  {ne:"फापर",        en:"Buckwheat",    ic:"🌾", rate:78,  chg:0},
   pea:        {ne:"केराउ",       en:"Pea",          ic:"🫛", rate:72,  chg:+3},
-  radish:     {ne:"मुला",        en:"Radish",       ic:"🥬", rate:28,  chg:-2}
+  radish:     {ne:"मुला",        en:"Radish",       ic:"🥕", rate:28,  chg:-2}
 };
 
 /* Backend crop codes (GOLB, KAULI…) → frontend CROPS keys */
@@ -905,16 +905,18 @@ async function loadLots(){
     const res = await fetch(`${BACKEND.baseUrl}/v1/lots`);
     if(!res.ok) throw new Error(res.status);
     const data = await res.json();
-    // Backend lots: map to frontend shape. Only show ready lots.
+    // Backend is source of truth when connected — even if empty.
+    // Showing demo data alongside an empty API is a data contradiction
+    // that destroys trust. Demo lots only exist in offline mode.
     const live = (Array.isArray(data) ? data : []).filter(l=>l.status==="ready").map(l=>({
       id: l.id, crop: l.crop_code, coop: l.coop_name || "सहकारी", coopEn: l.coop_name_en || "Co-op",
       kg: l.pooled_kg, rate: l.rate_per_kg, farmers: l.farmer_count || 0,
       day: "बिहीबार", dayEn: "Thursday", dist: "", distEn: "",
       _live: true
     }));
-    if(live.length){ LOTS = live; }
+    LOTS = live;
     lotsLoaded = true;
-  }catch(e){ /* stay on demo data */ }
+  }catch(e){ /* network failed: keep demo data, backend may be down */ }
 }
 
 /* ===================================================================
@@ -924,7 +926,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 const TABS = {
-  farmer:[["today","🏠","आज","Today"],["sell","🧺","बेच्ने","Sell"],["advice","🌱","सल्लाह","Advice"],["doctor","🩺","डा. किसान","Crop Dr"],["rental","🚜","भाडा","Rent"],["mine","👤","मेरो","Mine"]],
+  farmer:[["today","🏠","आज","Today"],["sell","🧺","बेच्ने","Sell"],["advice","🌱","सल्लाह","Advice"],["doctor","🩺","डा. किसान","Crop Doctor"],["rental","🚜","भाडा","Rent"],["mine","👤","मेरो","Mine"]],
   buyer: [["market","🛒","बजार","Market"],["cart","🧾","अर्डर","Order"],["offers","💬","अफरहरू","Offers"],["how","❓","कसरी","How"]],
   coop:  [["pool","📥","आएका","Incoming"],["route","🚚","बाटो","Route"],["board","📊","हिसाब","Board"]],
   admin: [["admin_overview","📊","ड्यासबोर्ड","Dashboard"],["admin_farmers","👨‍🌾","किसान","Farmers"],["admin_lots","📦","लट सूची","Lots"],["admin_offers","💬","अफरहरू","Offers"],["admin_rates","📈","भाउ अपडेट","Rates"]]
@@ -970,7 +972,7 @@ function speak(text){
 }
 
 function header(){
-  $("brandBox").innerHTML = `किसान बजार<small>KISAN BAZAR · ${esc(BS_MONTHS[BS_NOW])} ${esc(N(BS_YEAR))}</small>`;
+  $("brandBox").innerHTML = `किसान बजार<small>KISAN BAZAR · ${esc(T(BS_MONTHS[BS_NOW], BS_EN[BS_NOW]))} ${esc(N(BS_YEAR))}</small>`;
   const ln = $("langNe"), le = $("langEn");
   if(ln){ ln.classList.toggle("on", L==="ne"); ln.setAttribute("aria-pressed", L==="ne"); }
   if(le){ le.classList.toggle("on", L==="en"); le.setAttribute("aria-pressed", L==="en"); }
@@ -1074,8 +1076,8 @@ function viewToday(){
       ${esc(T("इन्टरनेट नभएको बेला यही चेतावनी सादा फोनमा SMS र IVR कलबाट पुग्छ।",
               "When there's no internet, the same warning reaches basic phones by SMS and IVR call."))}</div>
 
-    <div class="demo">${esc(T("यो नमुना संस्करण हो। मौसम र भाउ वास्तविक API बाट जोडिनुपर्छ।",
-                              "Prototype. Weather and rates must be wired to live APIs."))}</div>
+    <div class="demo">${esc(T("मौसम पूर्वानुमान र बजार भाउ नियमित अद्यावधिक हुन्छ।",
+                              "Weather forecasts and market rates update regularly."))}</div>
   </div>`;
 }
 
@@ -1526,7 +1528,7 @@ function viewSell(){
 
     <h2 class="sec">${esc(T("कस्तो माल?","What quality?"))}</h2>
     <div class="grid c3">
-      ${[["A","राम्रो · ठूलो","Best · large"],["B","मध्यम","Medium"],["C","सानो · दाग","Small · marked"]]
+      ${[["A","राम्रो · ठूलो","Grade A · Large"],["B","मध्यम","Grade B · Medium"],["C","सानो · दाग","Grade C · Small / Marked"]]
         .map(([g,ne,en])=>`<button class="pick" data-grade="${g}" aria-pressed="${sell.grade===g}">
           <span class="ic" aria-hidden="true">${g==="A"?"⭐":g==="B"?"👍":"🙂"}</span>${esc(T(ne,en))}</button>`).join("")}
     </div>
@@ -1575,7 +1577,7 @@ function viewDoctor(){
     <h2 class="sec">${esc(T("लक्षण लेख्नुहोस्","Describe symptoms"))}</h2>
     <div class="card">
       <textarea id="doctorSymptoms" rows="3" placeholder="${esc(T("जस्तै: पातमा कालो दाग देखियो, पात सुक्दैछ…","e.g. black spots on leaves, leaves drying…"))}"
-        style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:15px">${esc(doctor.symptoms)}</textarea>
+        style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:15px;font-family:inherit">${esc(doctor.symptoms)}</textarea>
       <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
         <label class="btn ghost" style="flex:1;text-align:center;cursor:pointer">
           📷 ${esc(T("फोटो","Photo"))}
@@ -1712,7 +1714,7 @@ function viewAdvice(){
   const zoneGrid = ZONES.map(z=>`<button class="pick" data-zone="${z.id}" aria-pressed="${S.zone===z.id}">
     <span class="ic" aria-hidden="true">${z.ic}</span>${esc(T(z.ne,z.en))}</button>`).join("");
   const landGrid = LANDS.map(l=>`<button class="pick" data-land="${l.id}" aria-pressed="${S.land===l.id}">
-    <span class="ic" aria-hidden="true">${l.ic}</span>${esc(T(l.ne,l.en))}</button>`).join("");
+    <span class="ic" aria-hidden="true">${l.ic}</span>${S.land===l.id?"✓ ":""}${esc(T(l.ne,l.en))}</button>`).join("");
 
   // While a scan is in progress (photo/questions not yet finished), there's
   // no land type to base a recommendation on — show a placeholder instead of
@@ -1812,13 +1814,12 @@ const RENTAL_ICON = {power_tiller:"🚜", mini_tiller:"🚜", thresher:"🌾", s
   tractor:"🚜", harvester:"🌾", other:"🔧"};
 
 function viewRental(){
-  if(!BACKEND.enabled){
-    return `<div class="stack"><div class="empty card"><span class="ic">🚜</span>
-      <b>${esc(T("मेसिन भाडा","Machinery rental"))}</b>
-      ${esc(T("इन्टरनेट जोड्नुहोस् — 'मेरो' ट्याबबाट सर्भर जोड्नुहोस्।","Connect to the server from the 'Mine' tab."))}</div></div>`;
-  }
-  fetchRentals().then(()=>render({skipScroll:true}));
-  const list = rentalsCache.data || [];
+  const demoRentals = [
+    {id:"d1", machine_name:"Sifang Power Tiller 12HP", machine_type:"power_tiller", rate_per_day:1500, location:"Dhulikhel", owner_name:"Ram Bahadur", contact_phone:"9841000002"},
+    {id:"d2", machine_name:"Mini Tiller 7HP", machine_type:"mini_tiller", rate_per_day:800, location:"Banepa", owner_name:"Mina Shrestha", contact_phone:"9841000003"},
+  ];
+  const list = BACKEND.enabled ? (rentalsCache.data || []) : demoRentals;
+  if(BACKEND.enabled) fetchRentals().then(()=>render({skipScroll:true}));
   return `<div class="stack">
     <div class="card" style="border-left:7px solid var(--paddy)">
       <div class="warn-line" style="font-size:20px">🚜 ${esc(T("मेसिन भाडामा","Rent machinery"))}</div>
@@ -1868,7 +1869,7 @@ function viewMine(){
   <div class="stack">
     <div class="kpi">
       <div><b>${esc(T("यो सिजन पाएको","Received this season"))}</b><i style="color:var(--paddy)">${esc(money(paid))}</i></div>
-      <div><b>${esc(T("आउन बाँकी","Still to come"))}</b><i style="color:var(--tori)">${esc(money(due))}</i></div>
+      <div><b>${esc(T("आउन बाँकी","Pending"))}</b><i style="color:var(--tori)">${esc(money(due))}</i></div>
     </div>
     <div class="card" style="padding:0">
       ${S.offers.length ? S.offers.map(offerRow).join("")
@@ -1960,6 +1961,17 @@ function renderAccountPanel(){
 
 /* ---------------- BUYER ---------------- */
 function viewMarket(){
+  if(!LOTS.length){
+    return `<div class="stack">
+      <div class="card" style="border-left:7px solid var(--paddy)">
+        <div class="warn-line" style="font-size:20px">${esc(T("सहकारीबाट सिधै","Straight from the co-op"))}</div>
+        <div class="warn-sub">${esc(T("मंगलबार अर्डर → बुधबार टिप्ने → बिहीबार डेलिभरी।","Order Tuesday → picked Wednesday → delivered Thursday."))}</div>
+      </div>
+      <div class="empty card"><span class="ic">🧺</span>
+        <b>${esc(T("अहिले कुनै लट छैन","No lots right now"))}</b>
+        ${esc(T("सहकारीले नयाँ लट बनाउँदा यहाँ देखिन्छ।","New lots appear here as co-ops form them."))}</div>
+    </div>`;
+  }
   return `<div class="stack">
     <div class="card" style="border-left:7px solid var(--paddy)">
       <div class="warn-line" style="font-size:20px">${esc(T("सहकारीबाट सिधै","Straight from the co-op"))}</div>
@@ -2198,7 +2210,7 @@ function viewMyOffers(){
 function viewHow(){
   const steps = [
     ["🧺", "किसानले माल दर्ता गर्छ","Farmer lists the harvest","बिहान उठेर जति टिप्यो, त्यति एप वा SMS मा हाल्छ।","Whatever was picked that morning goes in, by app or SMS."],
-    ["🤝", "सहकारीले लट बनाउँछ","Co-op builds a lot","२० किसानको ३ के.जी. जोडिएर ४०० के.जी.को एउटा लट बन्छ।","Twenty farmers' 3 kg each becomes one 400 kg lot."],
+    ["🤝", "सहकारीले लट बनाउँछ","Co-op builds a lot","२० किसानको २० के.जी. जोडिएर ४०० के.जी.को एउटा लट बन्छ।","Twenty farmers' 20 kg each becomes one 400 kg lot."],
     ["🚚", "एउटै गाडी, एउटै बाटो","One vehicle, one route","गाडी भरिने भएकाले प्रतिकेजी ढुवानी खर्च आधा हुन्छ।","A full vehicle halves the per-kg transport cost."],
     ["📦", "सहरमा डेलिभरी","Delivered in the city","होटल, छात्रावास, पसल र घरमा तोकिएको दिन।","Hotels, hostels, shops and homes on a fixed day."],
     ["💸", "४८ घण्टामा भुक्तानी","Paid within 48 hours","तौल भएपछि सिधै किसानको वालेट वा नगदमा।","Straight to the farmer's wallet or cash after weighing."]
