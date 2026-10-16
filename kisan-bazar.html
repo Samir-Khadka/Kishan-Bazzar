@@ -1500,7 +1500,7 @@ function renderAuthModal(){
   </div>`;
 }
 
-function openAuth(){ account.showAuth = true; account.lastError = null; render({skipScroll:true}); }
+function openAuth(){ account.showAuth = true; account.lastError = null; if(account.loginStep==="idle") account.loginStep = "phone"; render({skipScroll:true}); }
 function closeAuth(){ account.showAuth = false; account.lastError = null; render({skipScroll:true}); }
 async function doAuthRequestCode(){
   const phone = ($("auth-phone")||{}).value || "";
