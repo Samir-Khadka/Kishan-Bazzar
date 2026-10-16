@@ -44,8 +44,17 @@
   panel.innerHTML = `
     <div id="kb-chat-head"><span>🤖 <span data-ne="सहायक" data-en="Assistant">सहायक</span></span><button id="kb-chat-close">×</button></div>
     <div id="kb-chat-msgs"></div>
-    <div id="kb-chat-input"><input id="kb-chat-text" placeholder="…" maxlength="500"><button id="kb-chat-send">➤</button></div>`;
+    <div id="kb-chat-input"><input id="kb-chat-text" data-ph-ne="सन्देश लेख्नुहोस्…" data-ph-en="Type a message…" placeholder="सन्देश लेख्नुहोस्…" maxlength="500"><button id="kb-chat-send">➤</button></div>`;
   document.body.appendChild(panel);
+
+  // Translate the chat input placeholder when language toggles.
+  const chatInput = panel.querySelector("#kb-chat-text");
+  const syncChatLang = () => {
+    const lang = document.documentElement.lang === "en" ? "en" : "ne";
+    chatInput.placeholder = chatInput.getAttribute(lang === "en" ? "data-ph-en" : "data-ph-ne") || chatInput.placeholder;
+  };
+  new MutationObserver(syncChatLang).observe(document.documentElement, {attributes: true, attributeFilter: ["lang"]});
+  syncChatLang();
 
   const msgs = panel.querySelector("#kb-chat-msgs");
   const input = panel.querySelector("#kb-chat-text");
