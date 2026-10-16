@@ -166,6 +166,17 @@ CREATE TABLE IF NOT EXISTS land_scans (
 );
 CREATE INDEX IF NOT EXISTS land_scans_farmer_idx ON land_scans (farmer_phone, created_at DESC);
 
+-- Idempotency keys for POST endpoints. When a phone loses signal mid-request
+-- and retries, the same key returns the original response instead of creating
+-- a duplicate listing or order. Keys expire after 24h (cleaned up lazily).
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    key             TEXT PRIMARY KEY,
+    endpoint        TEXT NOT NULL,
+    status_code     INTEGER NOT NULL,
+    response_body   TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Phone-verification codes for login. A code is single-use (consumed_at
 -- set once redeemed) and short-lived (expires_at). Codes are stored
 -- hashed, not in plaintext — even a full database read doesn't hand an

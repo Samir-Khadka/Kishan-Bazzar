@@ -212,6 +212,79 @@ def require_self(phone_arg_name):
     return decorator
 
 
+def idempotent(f):
+    """Idempotency for POST endpoints. The client sends a unique
+    `Idempotency-Key` header per logical operation (e.g. a UUID generated
+    when the user taps the button). If the same key arrives again — a retry
+    after a dropped connection — the original response is replayed instead
+    of creating a duplicate. Without the header, the request runs normally
+    (backward compatible). Keys expire after 24 hours."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        key = request.headers.get("Idempotency-Key", "").strip()
+        if not key:
+            return f(*args, **kwargs)
+        if len(key) > 128:
+            return jsonify({"error": "Idempotency-Key too long"}), 400
+        conn = db.get_db()
+        # Lazy cleanup of expired keys (older than 24h). Commit immediately
+        # and close — the connection must NOT stay open while the handler
+        # runs, or its writes will deadlock on the lock we hold.
+        conn.execute(
+            "DELETE FROM idempotency_keys WHERE created_at < datetime('now', '-1 day')"
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT status_code, response_body FROM idempotency_keys WHERE key=? AND endpoint=?",
+            (key, request.path),
+        ).fetchone()
+        conn.close()
+        if row:
+            return app.response_class(
+                response=row["response_body"],
+                status=row["status_code"],
+                mimetype="application/json",
+            )
+        # First time: run the handler, then store its response.
+        # Fresh connection — the lookup connection is already closed.
+        resp = f(*args, **kwargs)
+        # Normalize to (body, status) — handlers return jsonify(...) or (jsonify, code).
+        if isinstance(resp, tuple):
+            body_resp, status = resp[0], resp[1]
+        else:
+            body_resp, status = resp, 200
+        try:
+            body_text = body_resp.get_data(as_text=True)
+        except Exception:
+            body_text = ""
+        conn = db.get_db()
+        try:
+            conn.execute(
+                "INSERT INTO idempotency_keys (key, endpoint, status_code, response_body) "
+                "VALUES (?,?,?,?)",
+                (key, request.path, status, body_text),
+            )
+            conn.commit()
+        except Exception:
+            # Race: another worker stored this key first. Replay it instead.
+            conn.rollback()
+            row = conn.execute(
+                "SELECT status_code, response_body FROM idempotency_keys WHERE key=? AND endpoint=?",
+                (key, request.path),
+            ).fetchone()
+            conn.close()
+            if row:
+                return app.response_class(
+                    response=row["response_body"],
+                    status=row["status_code"],
+                    mimetype="application/json",
+                )
+            return resp
+        conn.close()
+        return resp
+    return wrapper
+
+
 def require_staff(f):
     """Beyond require_auth: the authenticated phone must belong to a
     farmer record with is_staff=1. Used for co-op actions like pricing
@@ -404,6 +477,7 @@ def signup():
 @app.post("/v1/listings")
 @require_auth
 @require_self("farmer_phone")
+@idempotent
 def create_listing():
     body = request.get_json(force=True)
     required = ["farmer_phone", "coop_id", "crop_code", "grade", "quantity_kg"]
@@ -617,6 +691,7 @@ def land_scan_history(phone):
 # ---------------- orders ----------------
 
 @app.post("/v1/orders")
+@idempotent
 def place_order():
     # Buyers (hotels, hostels) are a separate identity class this prototype
     # doesn't model login for yet. Minimum viable protection: every order

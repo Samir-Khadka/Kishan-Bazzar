@@ -562,7 +562,9 @@ async function apiVerifyCode(phone, code){
 async function apiCreateListing(token, payload){
   const res = await fetch(`${BACKEND.baseUrl}/v1/listings`, {
     method: "POST",
-    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${token}`},
+    // Idempotency-Key: one UUID per submission. Retries after a dropped
+    // connection replay the original response instead of double-posting.
+    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${token}`, "Idempotency-Key": crypto.randomUUID()},
     body: JSON.stringify(payload)
   });
   const data = await res.json().catch(()=>({}));
@@ -2196,9 +2198,12 @@ async function doSubmitOffer(){
   render();
 }
 
+let _ordering = false;  // guards against double-tap duplicate orders
 async function doPlaceOrder(){
+  if(_ordering) return;  // already submitting — ignore the second tap
   const rows = Object.entries(S.cart).filter(([id,q])=>q>0 && LOTS.some(x=>x.id===id));
   if(!rows.length) return;
+  _ordering = true;
 
   // Need buyer identity for the real API.
   const buyerName = account.token && account.role==="buyer" ? account.name : null;
@@ -2222,7 +2227,10 @@ async function doPlaceOrder(){
     try{
       const res = await fetch(`${BACKEND.baseUrl}/v1/orders`, {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
+        // Idempotency-Key: one UUID per tap. If the request retries after a
+        // dropped connection, the server replays the original response
+        // instead of creating a duplicate order.
+        headers: {"Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID()},
         body: JSON.stringify({
           buyer_name: buyerName || "Buyer",
           buyer_phone: buyerPhone,
@@ -2233,6 +2241,7 @@ async function doPlaceOrder(){
       if(res.ok) ok++; else failed++;
     }catch(e){ failed++; }
   }
+  _ordering = false;  // release the guard
   if(ok){
     S.cart = {}; S.tab = "market";
     toast(T(`${ok} अर्डर पक्का भयो`, `${ok} order${ok>1?"s":""} confirmed`));
