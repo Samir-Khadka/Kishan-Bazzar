@@ -461,6 +461,12 @@ const CROPS = {
   radish:     {ne:"मुला",        en:"Radish",       ic:"🥬", rate:28,  chg:-2}
 };
 
+/* Backend crop codes (GOLB, KAULI…) → frontend CROPS keys */
+const CROP_CODE_MAP = {GOLB:"tomato", KAULI:"cauliflower", ALU:"potato", PYAJ:"onion",
+  TORI:"mustard", MUSURO:"lentil", ADUWA:"ginger", ALAICHI:"cardamom", JUNAR:"junar",
+  SYAU:"apple", DHAN:"paddy", GAHU:"wheat", MAKAI:"maize", FAPAR:"buckwheat",
+  KERAU:"pea", MULA:"radish"};
+
 /* ---------------- backend integration ----------------
    The app, the API, and the SMS/USSD system were each built and tested
    in isolation and never actually wired together — see
@@ -918,10 +924,10 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 const TABS = {
-  farmer:[["today","🏠","आज","Today"],["sell","🧺","बेच्ने","Sell"],["advice","🌱","सल्लाह","Advice"],["mine","👤","मेरो","Mine"]],
-  buyer: [["market","🛒","बजार","Market"],["cart","🧾","अर्डर","Order"],["how","❓","कसरी","How"]],
+  farmer:[["today","🏠","आज","Today"],["sell","🧺","बेच्ने","Sell"],["advice","🌱","सल्लाह","Advice"],["doctor","🩺","डा. किसान","Crop Dr"],["rental","🚜","भाडा","Rent"],["mine","👤","मेरो","Mine"]],
+  buyer: [["market","🛒","बजार","Market"],["cart","🧾","अर्डर","Order"],["offers","💬","अफरहरू","Offers"],["how","❓","कसरी","How"]],
   coop:  [["pool","📥","आएका","Incoming"],["route","🚚","बाटो","Route"],["board","📊","हिसाब","Board"]],
-  admin: [["admin_overview","📊","ड्यासबोर्ड","Dashboard"],["admin_farmers","👨‍🌾","किसान","Farmers"],["admin_lots","📦","लट सूची","Lots"],["admin_rates","📈","भाउ अपडेट","Rates"]]
+  admin: [["admin_overview","📊","ड्यासबोर्ड","Dashboard"],["admin_farmers","👨‍🌾","किसान","Farmers"],["admin_lots","📦","लट सूची","Lots"],["admin_offers","💬","अफरहरू","Offers"],["admin_rates","📈","भाउ अपडेट","Rates"]]
 };
 
 /* Professional stroke icons (24x24, currentColor) replacing emoji in nav.
@@ -931,8 +937,11 @@ const ICONS = {
   sell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h14l-1.5 12.5a1 1 0 0 1-1 .5h-9a1 1 0 0 1-1-.5L5 8z"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/></svg>',
   advice: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-8"/><path d="M12 14c0-4 3-7 8-7 0 4-3 7-8 7z"/><path d="M12 14c0-4-3-7-8-7 0 4 3 7 8 7z"/></svg>',
   mine: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>',
+  doctor: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3"/><path d="M8 15v1a6 6 0 0 0 6 6a6 6 0 0 0 6-6v-4"/><circle cx="20" cy="10" r="2"/></svg>',
+  rental: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M6 17l1.5-6h9L18 17"/><circle cx="8.5" cy="19.5" r="1.5"/><circle cx="15.5" cy="19.5" r="1.5"/><path d="M9 11V7h6v4"/></svg>',
   market: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 3h3l2.6 12.5a1 1 0 0 0 1 .5h8.7a1 1 0 0 0 1-.8L21 7H6"/></svg>',
   cart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6"/></svg>',
+  offers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   how: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg>',
   pool: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1z"/></svg>',
   route: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8h14v9H1z"/><path d="M15 11h4l4 4v2h-8z"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/></svg>',
@@ -940,6 +949,7 @@ const ICONS = {
   admin_overview: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>',
   admin_farmers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20c0-3-2.5-5-5.5-5.3"/></svg>',
   admin_lots: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>',
+  admin_offers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   admin_rates: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>'
 };
 
@@ -1051,6 +1061,8 @@ function viewToday(){
     <h2 class="sec">${esc(T("आजको भाउ","Today's rates"))}</h2>
     <div class="prices">${near}</div>
 
+    <div id="priceTrends">${renderPriceTrends()}</div>
+
     <h2 class="sec">${esc(T("मैले बेच्न राखेको","What I've listed"))}</h2>
     <div class="card" style="padding:0">
       ${mine.length ? mine.map(offerRow).join("") : `<div class="empty"><span class="ic">🧺</span>
@@ -1064,6 +1076,70 @@ function viewToday(){
 
     <div class="demo">${esc(T("यो नमुना संस्करण हो। मौसम र भाउ वास्तविक API बाट जोडिनुपर्छ।",
                               "Prototype. Weather and rates must be wired to live APIs."))}</div>
+  </div>`;
+}
+
+/* ---------------- price trends ---------------- */
+let trendsCache = {data:null, at:0};
+async function fetchTrends(){
+  if(!BACKEND.enabled) return null;
+  const now = Date.now();
+  if(trendsCache.data && now - trendsCache.at < 120000) return trendsCache.data;
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/prices/trends?days=30`);
+    if(!res.ok) throw new Error(res.status);
+    trendsCache = {data: await res.json(), at: now};
+    return trendsCache.data;
+  }catch(e){ return trendsCache.data; }
+}
+
+function sparkline(points, w=260, h=60){
+  if(!points || points.length < 2) return "";
+  const vals = points.map(p=>p.avg_rate);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = (max - min) || 1;
+  const stepX = w / (points.length - 1);
+  const pts = points.map((p,i)=>{
+    const x = (i * stepX).toFixed(1);
+    const y = (h - 8 - ((p.avg_rate - min) / span) * (h - 16)).toFixed(1);
+    return `${x},${y}`;
+  }).join(" ");
+  const up = vals[vals.length-1] >= vals[0];
+  const color = up ? "var(--paddy)" : "#c0392b";
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;display:block" aria-hidden="true">
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>
+    ${points.map((p,i)=>{
+      const x = (i * stepX).toFixed(1);
+      const y = (h - 8 - ((p.avg_rate - min) / span) * (h - 16)).toFixed(1);
+      return `<circle cx="${x}" cy="${y}" r="3" fill="${color}"/>`;
+    }).join("")}
+  </svg>`;
+}
+
+function renderPriceTrends(){
+  if(!BACKEND.enabled) return "";
+  fetchTrends().then(()=>render({skipScroll:true}));
+  const data = trendsCache.data;
+  if(!data || !Object.keys(data).length) return "";
+  const crops = Object.keys(data).slice(0,4);
+  return `<h2 class="sec">${esc(T("भाउको ट्रेन्ड (३० दिन)","Price trends (30 days)"))}</h2>
+  <div class="card" style="margin-bottom:6px">
+    ${crops.map(code=>{
+      const pts = data[code];
+      const c = CROPS[CROP_CODE_MAP[code]] || {};
+      const first = pts[0].avg_rate, last = pts[pts.length-1].avg_rate;
+      const chg = last - first;
+      const arrow = chg > 0 ? "▲" : chg < 0 ? "▼" : "—";
+      const cls = chg > 0 ? "up" : chg < 0 ? "down" : "";
+      return `<div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <b>${esc(T(c.ne||code, c.en||code))}</b>
+          <span><b>${esc(money(last))}</b> <span class="${cls}">${arrow} ${esc(N(Math.abs(chg).toFixed(1)))}</span></span>
+        </div>
+        ${sparkline(pts)}
+      </div>`;
+    }).join("")}
+    <p class="demo" style="margin:0">${esc(T("वास्तविक कारोबार डेटा","Real transaction data"))}</p>
   </div>`;
 }
 
@@ -1477,6 +1553,81 @@ function viewSell(){
   </div>`;
 }
 
+/* ---------------- FARMER: crop doctor ---------------- */
+let doctor = {crop:"GOLB", symptoms:"", photoRef:null, result:null, busy:false};
+
+function viewDoctor(){
+  const crops = [["GOLB","गोलभेँडा","Tomato"],["KAULI","काउली","Cauliflower"],["ALU","आलु","Potato"],
+                 ["PYAJ","प्याज","Onion"],["ADUWA","अदुवा","Ginger"]];
+  const icons = {"GOLB":"🍅","KAULI":"🥦","ALU":"🥔","PYAJ":"🧅","ADUWA":"🫚"};
+  return `<div class="stack">
+    <div class="card" style="border-left:7px solid var(--paddy)">
+      <div class="warn-line" style="font-size:20px">🩺 ${esc(T("डा. किसान","Dr. Kisan"))}</div>
+      <div class="warn-sub">${esc(T("बालीको समस्या लेख्नुहोस् वा फोटो हाल्नुहोस् — AI ले रोग पहिचान गरी उपचार सुझाउँछ।",
+        "Describe the crop problem or add a photo — AI identifies the disease and suggests treatment."))}</div>
+    </div>
+
+    <h2 class="sec">${esc(T("कुन बाली?","Which crop?"))}</h2>
+    <div class="grid c3">${crops.map(([code,ne,en])=>
+      `<button class="pick" data-doctor-crop="${code}" aria-pressed="${doctor.crop===code}">
+        <span class="ic">${icons[code]}</span>${esc(T(ne,en))}</button>`).join("")}</div>
+
+    <h2 class="sec">${esc(T("लक्षण लेख्नुहोस्","Describe symptoms"))}</h2>
+    <div class="card">
+      <textarea id="doctorSymptoms" rows="3" placeholder="${esc(T("जस्तै: पातमा कालो दाग देखियो, पात सुक्दैछ…","e.g. black spots on leaves, leaves drying…"))}"
+        style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:15px">${esc(doctor.symptoms)}</textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+        <label class="btn ghost" style="flex:1;text-align:center;cursor:pointer">
+          📷 ${esc(T("फोटो","Photo"))}
+          <input type="file" id="doctorPhoto" accept="image/*" capture="environment" style="display:none">
+        </label>
+        <button class="btn" id="doctorDiagnoseBtn" style="flex:2" ${doctor.busy?"disabled":""}>
+          ${doctor.busy?esc(T("जाँच हुँदैछ…","Diagnosing…")):esc(T("रोग पहिचान गर्नुहोस्","Diagnose"))}</button>
+      </div>
+      <div class="demo">${doctor.photoRef?esc(T("फोटो थपियो ✓","Photo added ✓")):""}</div>
+    </div>
+
+    ${doctor.result ? renderDoctorResult(doctor.result) : ""}
+
+    <div class="demo">${esc(T("यो AI सुझाव हो — निश्चितताका लागि स्थानीय कृषि प्राविधिकसँग परामर्श गर्नुहोस्।",
+      "This is AI guidance — consult your local agri technician to confirm."))}</div>
+  </div>`;
+}
+
+function renderDoctorResult(r){
+  return `<div class="card" style="border-left:7px solid var(--tori);background:var(--tori-soft);margin-top:4px">
+    <div class="warn-line" style="font-size:18px">🔍 ${esc(T("निदान","Diagnosis"))}: ${esc(r.crop.ne)} (${esc(r.crop.en)})</div>
+    ${r.diagnoses.map((d,i)=>`<div style="margin-top:10px;padding-top:10px;${i?"border-top:1px solid var(--line);":""}">
+      <b>${i+1}. ${esc(d.key.replace(/_/g," "))}</b>
+      <p style="margin-top:6px">${esc(d.remedy)}</p>
+    </div>`).join("")}
+    <p class="demo" style="margin-top:10px">${esc(r.note)}</p>
+  </div>`;
+}
+
+async function doDiagnose(){
+  const symptoms = (($("doctorSymptoms")||{}).value || "").trim();
+  if(!symptoms && !doctor.photoRef){
+    toast(T("लक्षण लेख्नुहोस् वा फोटो हाल्नुहोस्","Describe symptoms or add a photo"));
+    return;
+  }
+  doctor.symptoms = symptoms; doctor.busy = true; render({skipScroll:true});
+  try{
+    if(!BACKEND.enabled) throw new Error(T("इन्टरनेट चाहिन्छ","Internet needed"));
+    const res = await fetch(`${BACKEND.baseUrl}/v1/crop-doctor/diagnose`, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({crop_code: doctor.crop, symptoms: symptoms || "(फोटो मात्र)",
+                            farmer_phone: account.phone || null, photo_ref: doctor.photoRef})
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || res.status);
+    doctor.result = data;
+  }catch(e){
+    toast(T("निदान हुन सकेन: ","Diagnosis failed: ") + (e.message||""));
+  }
+  doctor.busy = false; render({skipScroll:true});
+}
+
 /* ---------------- FARMER: advice ---------------- */
 function renderLandScan(){
   const steps = ["intro","texture","drainage","result"];
@@ -1639,6 +1790,76 @@ function viewAdvice(){
   </div>`;
 }
 
+/* ---------------- FARMER: machinery rentals ---------------- */
+let rentalsCache = {data:null, at:0};
+async function fetchRentals(){
+  if(!BACKEND.enabled) return [];
+  const now = Date.now();
+  if(rentalsCache.data && now - rentalsCache.at < 60000) return rentalsCache.data;
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/rentals`);
+    if(!res.ok) throw new Error(res.status);
+    rentalsCache = {data: await res.json(), at: now};
+    return rentalsCache.data;
+  }catch(e){ return rentalsCache.data || []; }
+}
+
+const RENTAL_TYPE_NE = {power_tiller:"पावर टिलर", mini_tiller:"मिनी टिलर", thresher:"थ्रेसर",
+  sprayer:"स्प्रेयर", tractor:"ट्र्याक्टर", harvester:"हार्भेस्टर", other:"अन्य"};
+const RENTAL_TYPE_EN = {power_tiller:"Power tiller", mini_tiller:"Mini tiller", thresher:"Thresher",
+  sprayer:"Sprayer", tractor:"Tractor", harvester:"Harvester", other:"Other"};
+const RENTAL_ICON = {power_tiller:"🚜", mini_tiller:"🚜", thresher:"🌾", sprayer:"💧",
+  tractor:"🚜", harvester:"🌾", other:"🔧"};
+
+function viewRental(){
+  if(!BACKEND.enabled){
+    return `<div class="stack"><div class="empty card"><span class="ic">🚜</span>
+      <b>${esc(T("मेसिन भाडा","Machinery rental"))}</b>
+      ${esc(T("इन्टरनेट जोड्नुहोस् — 'मेरो' ट्याबबाट सर्भर जोड्नुहोस्।","Connect to the server from the 'Mine' tab."))}</div></div>`;
+  }
+  fetchRentals().then(()=>render({skipScroll:true}));
+  const list = rentalsCache.data || [];
+  return `<div class="stack">
+    <div class="card" style="border-left:7px solid var(--paddy)">
+      <div class="warn-line" style="font-size:20px">🚜 ${esc(T("मेसिन भाडामा","Rent machinery"))}</div>
+      <div class="warn-sub">${esc(T("पावर टिलर, थ्रेसर, स्प्रेयर — दैनिक भाडामा।","Power tillers, threshers, sprayers — by the day."))}</div>
+    </div>
+    ${list.length ? list.map(r=>`
+      <div class="card" style="margin-bottom:10px">
+        <div class="item" style="border:0;padding:0">
+          <div class="em">${RENTAL_ICON[r.machine_type]||"🔧"}</div>
+          <div class="bd"><b>${esc(r.machine_name)}</b>
+            <p>${esc(T(RENTAL_TYPE_NE[r.machine_type]||r.machine_type, RENTAL_TYPE_EN[r.machine_type]||r.machine_type))} · ${esc(r.location)}</p>
+            <p>${esc(r.owner_name)} · ${esc(r.contact_phone)}</p></div>
+          <div class="money">${esc(money(r.rate_per_day))}<div style="font-size:12px;color:var(--ink-3)">${esc(T("प्रति दिन","per day"))}</div></div>
+        </div>
+        <button class="btn ghost" data-book-rental="${r.id}" style="width:100%;margin-top:8px">📅 ${esc(T("बुक गर्नुहोस्","Book"))}</button>
+      </div>`).join("")
+    : `<div class="card"><p>${esc(T("अहिले कुनै मेसिन उपलब्ध छैन।","No machines available right now."))}</p></div>`}
+  </div>`;
+}
+
+async function doBookRental(rentalId){
+  if(!account.token){
+    toast(T("बुक गर्न लगइन गर्नुहोस्","Log in to book"));
+    S.role="farmer"; S.tab="mine"; render(); return;
+  }
+  const days = prompt(T("कति दिन? (1-30)","How many days? (1-30)"), "1");
+  const n = parseInt(days);
+  if(!n || n<1 || n>30) return;
+  const date = prompt(T("मिति (YYYY-MM-DD)","Date (YYYY-MM-DD)"), new Date().toISOString().slice(0,10));
+  if(!date) return;
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/rentals/${rentalId}/book`, {
+      method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${account.token}`},
+      body: JSON.stringify({days:n, book_date:date})
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || res.status);
+    toast(`${T("बुकिङ भयो!","Booked!")} ${T("जम्मा","Total")}: ${money(data.total)}`);
+  }catch(e){ toast(T("बुक हुन सकेन: ","Booking failed: ")+(e.message||"")); }
+}
+
 /* ---------------- FARMER: mine ---------------- */
 function viewMine(){
   const paid = S.offers.filter(o=>o.status==="paid").reduce((a,o)=>a+o.kg*o.rate,0);
@@ -1759,10 +1980,88 @@ function viewMarket(){
           <div class="num"><button data-lot="${l.id}" data-d="-5">−</button>
           <input value="${esc(N(q))} ${esc(T("के.जी.","kg"))}" readonly aria-label="${esc(T("अर्डर मात्रा","Order quantity"))}">
           <button data-lot="${l.id}" data-d="5">+</button></div>
+          ${l._live ? `<button class="btn ghost" data-offer-lot="${l.id}" style="margin-top:8px;width:100%">💬 ${esc(T("मोलतोल गर्नुहोस्","Make an offer"))}</button>` : ""}
         </div>
       </div>`;
     }).join("")}
   </div>`;
+}
+
+/* ---------------- Bid / Offer dialog ---------------- */
+function showOfferDialog(lotId){
+  const lot = LOTS.find(x=>x.id===lotId);
+  if(!lot) return;
+  if(!BACKEND.enabled){
+    toast(T("मोलतोल गर्न इन्टरनेट चाहिन्छ","Internet needed to make offers"));
+    return;
+  }
+  const buyerPhone = account.token && account.role==="buyer" ? account.phone : null;
+  if(!buyerPhone){
+    toast(T("पहिले क्रेताको रूपमा लगइन गर्नुहोस्","Please log in as a buyer first"));
+    S.role = "farmer"; S.tab = "mine"; render();
+    return;
+  }
+  S.offerDialog = {lotId, rate: lot.rate, qty: 10};
+  render();
+}
+
+function renderOfferDialog(){
+  const d = S.offerDialog;
+  if(!d) return "";
+  const lot = LOTS.find(x=>x.id===d.lotId);
+  if(!lot) return "";
+  const c = CROPS[lot.crop] || {};
+  return `<div class="modalWrap" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:60;display:flex;align-items:center;justify-content:center;padding:20px">
+    <div class="card" style="width:100%;max-width:380px">
+      <h2 class="sec" style="margin-top:0">💬 ${esc(T("मोलतोल गर्नुहोस्","Make an offer"))}</h2>
+      <p><b>${esc(T(c.ne||lot.crop, c.en||lot.crop))}</b> · ${esc(T(lot.coop,lot.coopEn))}</p>
+      <p style="color:var(--ink-2);font-size:14px">${esc(T("सूची भाउ","Listed rate"))}: <b>${esc(money(lot.rate))}</b> ${esc(T("प्रति के.जी.","per kg"))}</p>
+      <div class="lbl">${esc(T("तपाईंको भाउ (रू/के.जी.)","Your rate (Rs/kg)"))}</div>
+      <div class="num" style="margin-bottom:10px">
+        <input id="offerRate" type="number" min="1" value="${d.rate}" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px">
+      </div>
+      <div class="lbl">${esc(T("मात्रा (के.जी.)","Quantity (kg)"))}</div>
+      <div class="num" style="margin-bottom:14px">
+        <input id="offerQty" type="number" min="1" max="${lot.kg}" value="${d.qty}" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost" id="offerCancelBtn" style="flex:1">${esc(T("रद्द","Cancel"))}</button>
+        <button class="btn" id="offerSubmitBtn" style="flex:2">${esc(T("अफर पठाउनुहोस्","Send offer"))}</button>
+      </div>
+      <div class="demo" style="margin-top:8px">${esc(T("सहकारीले स्वीकार, अस्वीकार वा काउन्टर-अफर गर्न सक्छ।","The co-op can accept, reject, or counter your offer."))}</div>
+    </div>
+  </div>`;
+}
+
+async function doSubmitOffer(){
+  const d = S.offerDialog;
+  if(!d) return;
+  const rate = parseFloat(($("offerRate")||{}).value);
+  const qty = parseFloat(($("offerQty")||{}).value);
+  if(!rate || rate <= 0 || !qty || qty <= 0){
+    toast(T("भाउ र मात्रा सही लेख्नुहोस्","Enter a valid rate and quantity"));
+    return;
+  }
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/offers`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        buyer_name: account.name || "Buyer",
+        buyer_phone: account.phone,
+        lot_id: d.lotId,
+        bid_rate_per_kg: rate,
+        quantity_kg: qty
+      })
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || res.status);
+    S.offerDialog = null;
+    toast(T("अफर पठाइयो! सहकारीको जवाफ पर्खनुहोस्","Offer sent! Waiting for co-op response"));
+  }catch(e){
+    toast(T("अफर पठाउन सकिएन: ","Could not send offer: ") + (e.message||""));
+  }
+  render();
 }
 
 async function doPlaceOrder(){
@@ -1833,6 +2132,66 @@ function viewCart(){
     </div>
     <button class="btn" id="orderBtn">${esc(T("अर्डर पक्का गर्नुहोस्","Confirm order"))}</button>
     <div class="demo">${esc(T("भुक्तानी: eSewa, खल्ती, फोनपे वा डेलिभरीमा नगद।","Payment: eSewa, Khalti, Fonepay, or cash on delivery."))}</div>
+  </div>`;
+}
+
+let myOffersCache = {data:null, at:0};
+async function fetchMyOffers(){
+  if(!BACKEND.enabled || !account.phone) return [];
+  const now = Date.now();
+  if(myOffersCache.data && now - myOffersCache.at < 30000) return myOffersCache.data;
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/offers?buyer_phone=${encodeURIComponent(account.phone)}`);
+    if(!res.ok) throw new Error(res.status);
+    myOffersCache = {data: await res.json(), at: now};
+    return myOffersCache.data;
+  }catch(e){ return myOffersCache.data || []; }
+}
+
+function viewMyOffers(){
+  const phone = account.token && account.role==="buyer" ? account.phone : null;
+  if(!phone || !BACKEND.enabled){
+    return `<div class="stack"><div class="empty card"><span class="ic">💬</span>
+      <b>${esc(T("अफरहरू हेर्न लगइन गर्नुहोस्","Log in to see your offers"))}</b>
+      ${esc(T("क्रेताको रूपमा लगइन गरेपछि तपाईंका मोलतोल यहाँ देखिन्छन्।","Your negotiations appear here once logged in as a buyer."))}</div></div>`;
+  }
+  fetchMyOffers().then(()=>render({skipScroll:true}));
+  const offers = myOffersCache.data || [];
+  if(!offers.length){
+    return `<div class="stack"><div class="empty card"><span class="ic">💬</span>
+      <b>${esc(T("अहिलेसम्म कुनै अफर छैन","No offers yet"))}</b>
+      ${esc(T("बजारबाट लटमा मोलतोल गर्नुहोस्।","Make an offer on a lot from the market."))}</div></div>`;
+  }
+  const statusLabel = s => ({
+    pending: T("पर्खंदै","Pending"), accepted: T("स्वीकृत","Accepted"),
+    rejected: T("अस्वीकृत","Rejected"), countered: T("काउन्टर","Countered"),
+    converted: T("अर्डर बन्यो","Ordered"), withdrawn: T("फिर्ता","Withdrawn")
+  }[s] || s);
+  const statusColor = s => ({
+    pending: "var(--tori)", accepted: "var(--paddy)", converted: "var(--paddy)",
+    rejected: "#c0392b", countered: "#2980b9"
+  }[s] || "var(--ink-3)");
+  return `<div class="stack">
+    <h2 class="sec">${esc(T("मेरा अफरहरू","My offers"))}</h2>
+    ${offers.map(o=>{
+      const lot = LOTS.find(l=>l.id===o.lot_id);
+      const c = lot ? (CROPS[lot.crop]||{}) : {};
+      return `<div class="card" style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <b>${esc(T(c.ne||o.lot_id, c.en||o.lot_id))}</b>
+          <span class="pill" style="background:${statusColor(o.status)};color:#fff">${esc(statusLabel(o.status))}</span>
+        </div>
+        <p style="font-size:14px;color:var(--ink-2)">
+          ${esc(T("तपाईंको भाउ","Your bid"))}: <b>${esc(money(o.bid_rate_per_kg))}</b>/kg ·
+          ${esc(N(o.quantity_kg))} kg</p>
+        ${o.status==="countered" && o.counter_rate_per_kg ? `
+          <div class="card" style="background:var(--paper);margin:8px 0;padding:10px;border-left:4px solid #2980b9">
+            <b style="color:#2980b9">↩ ${esc(T("काउन्टर-अफर","Counter-offer"))}: ${esc(money(o.counter_rate_per_kg))}/kg</b>
+            <p style="font-size:13px;margin-top:4px">${esc(T("सहकारीले नयाँ भाउ प्रस्ताव गरेको छ।","The co-op proposed a new rate."))}</p>
+          </div>` : ""}
+        ${o.status==="converted" ? `<p style="color:var(--paddy);font-weight:700">✓ ${esc(T("अर्डरमा परिणत भयो","Converted to order"))}</p>` : ""}
+      </div>`;
+    }).join("")}
   </div>`;
 }
 
@@ -2056,6 +2415,67 @@ function viewAdminFarmers(){
     </table></div></div>`;
 }
 
+let adminOffersCache = {data:null, at:0};
+async function fetchAdminOffers(){
+  if(!BACKEND.enabled || !account.token) return [];
+  const now = Date.now();
+  if(adminOffersCache.data && now - adminOffersCache.at < 15000) return adminOffersCache.data;
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/offers`);
+    if(!res.ok) throw new Error(res.status);
+    adminOffersCache = {data: await res.json(), at: now};
+    return adminOffersCache.data;
+  }catch(e){ return adminOffersCache.data || []; }
+}
+
+function viewAdminOffers(){
+  const guard = viewAdminGuard();
+  if(guard) return guard;
+  fetchAdminOffers().then(()=>render({skipScroll:true}));
+  const offers = (adminOffersCache.data || []).filter(o=>["pending","countered"].includes(o.status));
+  const done = (adminOffersCache.data || []).filter(o=>!["pending","countered"].includes(o.status));
+  const row = o => `<div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <b>${esc(o.buyer_name)} <span style="color:var(--ink-3);font-weight:400">${esc(o.buyer_phone)}</span></b>
+        <span class="pill">${esc(o.lot_id)}</span>
+      </div>
+      <p>${esc(T("भाउ","Bid"))}: <b>${esc(money(o.bid_rate_per_kg))}</b>/kg · ${esc(N(o.quantity_kg))} kg</p>
+      ${o.status==="countered"&&o.counter_rate_per_kg?`<p style="color:#2980b9"><b>↩ ${esc(T("काउन्टर","Counter"))}: ${esc(money(o.counter_rate_per_kg))}/kg</b></p>`:""}
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn" data-decide-offer="${o.id}" data-decision="accepted" style="flex:1;padding:8px">✓ ${esc(T("स्वीकार","Accept"))}</button>
+        <button class="btn ghost" data-decide-offer="${o.id}" data-decision="rejected" style="flex:1;padding:8px">✕ ${esc(T("अस्वीकार","Reject"))}</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <input id="counter-${o.id}" type="number" min="1" placeholder="${esc(T("काउन्टर भाउ Rs/kg","Counter Rs/kg"))}" style="flex:2;padding:8px;border:1px solid var(--line);border-radius:8px">
+        <button class="btn ghost" data-counter-offer="${o.id}" style="flex:1;padding:8px">↩ ${esc(T("काउन्टर","Counter"))}</button>
+      </div>
+    </div>`;
+  return `<div class="stack">
+    <h2 class="sec">${esc(T("आएका अफरहरू","Incoming offers"))} (${offers.length})</h2>
+    ${offers.length ? offers.map(row).join("") : `<div class="card"><p>${esc(T("कुनै नयाँ अफर छैन।","No new offers."))}</p></div>`}
+    ${done.length ? `<h2 class="sec">${esc(T("फैसला भएका","Decided"))}</h2>${done.slice(0,10).map(o=>
+      `<div class="card" style="margin-bottom:8px"><b>${esc(o.buyer_name)}</b> · ${esc(o.lot_id)} ·
+       <span class="pill">${esc(o.status)}</span></div>`).join("")}` : ""}
+  </div>`;
+}
+
+async function decideOffer(offerId, decision, counterRate){
+  try{
+    const body = {decision};
+    if(decision==="countered") body.counter_rate_per_kg = counterRate;
+    const res = await fetch(`${BACKEND.baseUrl}/v1/offers/${offerId}/decide`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json","Authorization":`Bearer ${account.token}`},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || res.status);
+    adminOffersCache = {data:null, at:0};
+    toast(T("फैसला गरियो","Decided"));
+  }catch(e){ toast(T("सकिएन: ","Failed: ")+(e.message||"")); }
+  render({skipScroll:true});
+}
+
 function viewAdminRates(){
   const guard = viewAdminGuard();
   if(guard) return guard;
@@ -2088,11 +2508,11 @@ async function doConfirmLot(lotId){
 }
 
 /* ---------------- router ---------------- */
-const VIEWS = {today:viewToday, sell:viewSell, advice:viewAdvice, mine:viewMine,
-                market:viewMarket, cart:viewCart, how:viewHow,
+const VIEWS = {today:viewToday, sell:viewSell, advice:viewAdvice, doctor:viewDoctor, rental:viewRental, mine:viewMine,
+                market:viewMarket, cart:viewCart, offers:viewMyOffers, how:viewHow,
                 pool:viewPool, route:viewRoute, board:viewBoard,
                 admin_overview:viewAdminOverview, admin_farmers:viewAdminFarmers,
-                admin_lots:viewAdminLots, admin_rates:viewAdminRates};
+                admin_lots:viewAdminLots, admin_offers:viewAdminOffers, admin_rates:viewAdminRates};
 
 function render(opts){
   opts = opts || {};
@@ -2100,7 +2520,7 @@ function render(opts){
   if(!TABS[S.role].some(t=>t[0]===S.tab)) S.tab = TABS[S.role][0][0];
   header(); nav();
   $("main").innerHTML = (VIEWS[S.tab]||viewToday)();
-  $("sahayakRoot").innerHTML = renderSahayak();
+  $("sahayakRoot").innerHTML = renderSahayak() + renderOfferDialog();
   // chat interactions re-render too (new message, opening the panel) but
   // must NOT jump the whole page back to top the way a tab switch should —
   // callers that only touch chat state pass skipScroll.
@@ -2241,6 +2661,18 @@ document.addEventListener("click", e=>{
     S.cart[id]=Math.max(0, Math.min(l.kg, (S.cart[id]||0) + (+t.dataset.d)));
     render(); return;
   }
+  if(t.dataset.bookRental){ doBookRental(t.dataset.bookRental); return; }
+  if(t.dataset.doctorCrop){ doctor.crop = t.dataset.doctorCrop; doctor.result = null; render({skipScroll:true}); return; }
+  if(t.id==="doctorDiagnoseBtn" && !doctor.busy){ doDiagnose(); return; }
+  if(t.dataset.offerLot){ showOfferDialog(t.dataset.offerLot); return; }
+  if(t.id==="offerSubmitBtn"){ doSubmitOffer(); return; }
+  if(t.id==="offerCancelBtn"){ S.offerDialog=null; render(); return; }
+  if(t.dataset.decideOffer){ decideOffer(t.dataset.decideOffer, t.dataset.decision); return; }
+  if(t.dataset.counterOffer){
+    const v = parseFloat(($( "counter-"+t.dataset.counterOffer)||{}).value);
+    if(!v || v<=0){ toast(T("काउन्टर भाउ लेख्नुहोस्","Enter a counter rate")); return; }
+    decideOffer(t.dataset.counterOffer, "countered", v); return;
+  }
   if(t.id==="orderBtn"){ doPlaceOrder(); return; }
   if(t.id==="lotBtn"){ toast(T("लट KVR-११९ बन्यो · ४ किसान","Lot KVR-119 formed · 4 farmers")); return; }
   if(t.id==="resetBtn"){
@@ -2265,6 +2697,18 @@ document.addEventListener("keydown", e=>{
 
 document.addEventListener("change", e=>{
   if(e.target.id==="zoneSel"){ S.zone=e.target.value; render(); }
+
+  if(e.target.id==="doctorPhoto"){
+    const file = e.target.files && e.target.files[0];
+    if(!file) return;
+    // For now we store a local reference id; the photo itself stays on
+    // device until we add object-storage upload. The diagnosis works from
+    // the symptom text; the photo documents the case for the technician.
+    doctor.photoRef = "local-" + Date.now();
+    toast(T("फोटो थपियो ✓","Photo added ✓"));
+    render({skipScroll:true});
+    return;
+  }
 
   if(e.target.id==="photoInput"){
     const file = e.target.files && e.target.files[0];

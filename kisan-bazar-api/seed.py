@@ -58,9 +58,21 @@ def seed():
         "INSERT INTO crops (code, name_ne, name_en, shelf_life_hours) VALUES (?,?,?,?)", crops
     )
 
+    # Demo machinery rentals — hill-appropriate equipment
+    rentals = [
+        ("9841000002", "Ram Bahadur K.C.", "power_tiller", "Sifang Power Tiller 12HP", 1500, "Dhulikhel", "9841000002"),
+        ("9841000003", "Mina Shrestha", "mini_tiller", "Mini Tiller 7HP", 800, "Banepa", "9841000003"),
+        ("9841000004", "Krishna Lama", "sprayer", "Battery Sprayer 20L", 300, "Panauti", "9841000004"),
+        ("9841000001", "Sarita Tamang", "thresher", "Paddy Thresher", 1200, "Dhulikhel", "9841000001"),
+    ]
+    conn.executemany(
+        "INSERT INTO rentals (owner_phone, owner_name, machine_type, machine_name, rate_per_day, location, contact_phone) "
+        "VALUES (?,?,?,?,?,?,?)", rentals
+    )
+
     conn.commit()
     conn.close()
-    print("Seeded: 1 co-op, 5 farmers (1 out of collection radius), 1 staff account, 16 crops.")
+    print("Seeded: 1 co-op, 5 farmers (1 out of collection radius), 1 staff account, 16 crops, 4 rentals.")
 
 
 if __name__ == "__main__":

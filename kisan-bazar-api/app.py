@@ -621,6 +621,368 @@ def place_order():
     }), 201
 
 
+# ---------------- bid/offer negotiation ----------------
+
+@app.post("/v1/offers")
+def make_offer():
+    """Buyer places a bid/offer on a lot. Unlike fixed-price orders, offers
+    propose a rate — the co-op can accept, reject, or counter.
+    Requires buyer identity (phone). Rate-limited per IP."""
+    if not auth.check_rate_limit(f"offer:{request.remote_addr}", max_attempts=10, window_seconds=600):
+        return jsonify({"error": "too many offers, try again later"}), 429
+    body = request.get_json(force=True, silent=True) or {}
+    required = ["buyer_name", "buyer_phone", "lot_id", "bid_rate_per_kg", "quantity_kg"]
+    missing = [f for f in required if f not in body]
+    if missing:
+        return jsonify({"error": f"missing fields: {missing}"}), 400
+    phone = str(body["buyer_phone"]).strip()
+    if not re.fullmatch(r"9[678]\d{8}", phone):
+        return jsonify({"error": "buyer_phone must be a valid Nepali mobile number"}), 400
+    try:
+        rate = float(body["bid_rate_per_kg"]); qty = float(body["quantity_kg"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "bid_rate_per_kg and quantity_kg must be numbers"}), 400
+    if rate <= 0 or qty <= 0 or qty > MAX_REASONABLE_KG:
+        return jsonify({"error": "invalid rate or quantity"}), 400
+
+    conn = db.get_db()
+    lot = conn.execute("SELECT * FROM lots WHERE id=?", (body["lot_id"],)).fetchone()
+    if not lot:
+        conn.close()
+        return jsonify({"error": "lot not found"}), 404
+    if lot["status"] not in ("ready", "forming"):
+        conn.close()
+        return jsonify({"error": f"lot is '{lot['status']}', not open for offers"}), 409
+
+    cur = conn.execute(
+        "INSERT INTO offers (lot_id, buyer_phone, buyer_name, bid_rate_per_kg, quantity_kg) "
+        "VALUES (?,?,?,?,?)",
+        (body["lot_id"], phone, str(body["buyer_name"]).strip(), rate, qty))
+    conn.commit()
+    offer_id = cur.lastrowid
+    conn.close()
+    return jsonify({"offer_id": offer_id, "status": "pending",
+                    "message": "Offer placed. The co-op will respond soon."}), 201
+
+
+@app.get("/v1/offers")
+def list_offers():
+    """List offers, optionally filtered by lot_id or buyer_phone."""
+    lot_id = request.args.get("lot_id")
+    buyer_phone = request.args.get("buyer_phone")
+    conn = db.get_db()
+    q = "SELECT * FROM offers WHERE 1=1"
+    params = []
+    if lot_id:
+        q += " AND lot_id=?"; params.append(lot_id)
+    if buyer_phone:
+        q += " AND buyer_phone=?"; params.append(buyer_phone)
+    q += " ORDER BY created_at DESC"
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.post("/v1/offers/<int:offer_id>/decide")
+@require_auth
+def decide_offer(offer_id):
+    """Co-op staff accepts, rejects, or counters an offer.
+    Body: {"decision": "accepted"|"rejected"|"countered", "counter_rate_per_kg": N}
+    Accepted offers convert to real orders."""
+    conn = db.get_db()
+    me = conn.execute("SELECT is_staff FROM farmers WHERE phone=?",
+                      (g.phone,)).fetchone()
+    if not me or not me["is_staff"]:
+        conn.close()
+        return jsonify({"error": "staff only"}), 403
+    body = request.get_json(force=True, silent=True) or {}
+    decision = (body.get("decision") or "").strip().lower()
+    if decision not in ("accepted", "rejected", "countered"):
+        return jsonify({"error": "decision must be accepted, rejected, or countered"}), 400
+
+    conn = db.get_db()
+    offer = conn.execute("SELECT * FROM offers WHERE id=?", (offer_id,)).fetchone()
+    if not offer:
+        conn.close()
+        return jsonify({"error": "offer not found"}), 404
+    if offer["status"] != "pending" and not (offer["status"] == "countered" and decision in ("accepted", "rejected")):
+        conn.close()
+        return jsonify({"error": f"offer is '{offer['status']}', cannot decide"}), 409
+
+    if decision == "countered":
+        try:
+            counter = float(body.get("counter_rate_per_kg"))
+        except (TypeError, ValueError):
+            conn.close()
+            return jsonify({"error": "counter_rate_per_kg required for counter"}), 400
+        if counter <= 0:
+            conn.close()
+            return jsonify({"error": "counter rate must be positive"}), 400
+        conn.execute(
+            "UPDATE offers SET status='countered', counter_rate_per_kg=?, decided_at=datetime('now') WHERE id=?",
+            (counter, offer_id))
+    elif decision == "accepted":
+        # Convert to a real order at the agreed rate.
+        rate = offer["counter_rate_per_kg"] if offer["status"] == "countered" and offer["counter_rate_per_kg"] else offer["bid_rate_per_kg"]
+        conn.execute(
+            "INSERT INTO orders (buyer_name, buyer_phone, lot_id, quantity_kg, unit_rate, status) "
+            "VALUES (?,?,?,?,?,'placed')",
+            (offer["buyer_name"], offer["buyer_phone"], offer["lot_id"],
+             offer["quantity_kg"], rate))
+        conn.execute(
+            "UPDATE offers SET status='converted', decided_at=datetime('now') WHERE id=?",
+            (offer_id,))
+    else:
+        conn.execute(
+            "UPDATE offers SET status='rejected', decided_at=datetime('now') WHERE id=?",
+            (offer_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"offer_id": offer_id, "decision": decision})
+
+
+# ---------------- crop doctor ----------------
+
+# Symptom keywords mapped to pest/disease keys in ai_advisor.CROPS_INFO.
+# Each entry: (keywords_ne_en, pest_key). Matched against the farmer's
+# symptom description to rank likely diagnoses.
+SYMPTOM_INDEX = {
+    "cauliflower": [
+        (["लाही", "aphid", "lahi", "सेतो कीरा", "पात मुनि"], "lahi"),
+        (["फेद कुहिने", "damping", "बेर्ना मर्ने", "नर्सरी"], "damping_off"),
+        (["गाँठे", "clubroot", "जरा सुन्निने"], "clubroot"),
+    ],
+    "tomato": [
+        (["डढुवा", "blight", "कालो दाग", "पात डढ्ने"], "blight"),
+        (["पात खुम्चिने", "curl", "खुम्चिने", "सेतो झिँगा", "whitefly"], "leaf_curl"),
+    ],
+    "potato": [
+        (["खुम्रे", "grub", "khumre", "जमिनमुनि कीरा"], "khumre"),
+        (["डढुवा", "blight", "late blight"], "late_blight"),
+    ],
+    "onion": [
+        (["थ्रिप्स", "thrips", "चाँदी", "पात चम्किने"], "thrips"),
+    ],
+}
+
+
+@app.post("/v1/crop-doctor/diagnose")
+def crop_doctor_diagnose():
+    """Diagnose a crop problem from symptom description (+ optional photo).
+
+    Body: {"crop_code": "GOLB", "symptoms": "पातमा कालो दाग...",
+           "farmer_phone": "98...", "photo_ref": "optional-id"}
+    Returns ranked diagnoses with remedies from the agronomy KB.
+    Photo bytes are NOT sent here — upload separately; photo_ref links them.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    crop_code = (body.get("crop_code") or "").strip().upper()
+    symptoms = (body.get("symptoms") or "").strip()
+    farmer_phone = (body.get("farmer_phone") or "").strip() or None
+    photo_ref = (body.get("photo_ref") or "").strip() or None
+    if not crop_code or not symptoms:
+        return jsonify({"error": "crop_code and symptoms are required"}), 400
+
+    from ai_advisor import CROPS_INFO
+    # Find crop by code
+    crop_key = None
+    for key, info in CROPS_INFO.items():
+        if info.get("code", "").upper() == crop_code or key.upper() == crop_code:
+            crop_key = key
+            break
+    if not crop_key:
+        return jsonify({"error": f"unknown crop_code: {crop_code}"}), 400
+    info = CROPS_INFO[crop_key]
+
+    # Rank pest/disease entries by symptom keyword matches
+    q = symptoms.lower()
+    scored = []
+    for keywords, pest_key in SYMPTOM_INDEX.get(crop_key, []):
+        hits = sum(1 for kw in keywords if kw.lower() in q)
+        if hits and pest_key in info.get("pests", {}):
+            scored.append((hits, pest_key))
+    scored.sort(reverse=True)
+
+    diagnoses = []
+    for _, pest_key in scored:
+        diagnoses.append({
+            "key": pest_key,
+            "remedy": info["pests"][pest_key],
+        })
+    # If nothing matched, return all known issues for the crop
+    if not diagnoses:
+        diagnoses = [{"key": k, "remedy": v}
+                     for k, v in info.get("pests", {}).items()]
+
+    # Save to history
+    conn = db.get_db()
+    cur = conn.execute(
+        "INSERT INTO diagnoses (farmer_phone, crop_code, symptoms, photo_ref, diagnosis_key, diagnosis_text) "
+        "VALUES (?,?,?,?,?,?)",
+        (farmer_phone, crop_code, symptoms, photo_ref,
+         diagnoses[0]["key"] if diagnoses else None,
+         diagnoses[0]["remedy"] if diagnoses else ""))
+    conn.commit()
+    diag_id = cur.lastrowid
+    conn.close()
+
+    return jsonify({
+        "diagnosis_id": diag_id,
+        "crop": {"ne": info["ne"], "en": info["en"]},
+        "diagnoses": diagnoses,
+        "note": "यो AI सुझाव हो — निश्चितताका लागि स्थानीय कृषि प्राविधिकसँग परामर्श गर्नुहोस्। "
+                "(This is AI guidance — consult your local agri technician to confirm.)",
+    }), 200
+
+
+@app.get("/v1/crop-doctor/history")
+def crop_doctor_history():
+    """Past diagnoses for a farmer."""
+    phone = request.args.get("farmer_phone", "").strip()
+    if not phone:
+        return jsonify({"error": "farmer_phone required"}), 400
+    conn = db.get_db()
+    rows = conn.execute(
+        "SELECT * FROM diagnoses WHERE farmer_phone=? ORDER BY created_at DESC LIMIT 20",
+        (phone,)).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+# ---------------- machinery rentals ----------------
+
+RENTAL_TYPES = ("power_tiller", "mini_tiller", "thresher", "sprayer",
+                "tractor", "harvester", "other")
+
+@app.get("/v1/rentals")
+def list_rentals():
+    """List available machinery. Filter by ?type= and ?location=."""
+    mtype = request.args.get("type", "").strip()
+    loc = request.args.get("location", "").strip()
+    conn = db.get_db()
+    q = "SELECT * FROM rentals WHERE available=1"
+    params = []
+    if mtype:
+        q += " AND machine_type=?"; params.append(mtype)
+    if loc:
+        q += " AND location LIKE ?"; params.append(f"%{loc}%")
+    q += " ORDER BY created_at DESC"
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.post("/v1/rentals")
+@require_auth
+def create_rental():
+    """Owner lists a machine for rent. Auth required."""
+    body = request.get_json(force=True, silent=True) or {}
+    mtype = (body.get("machine_type") or "").strip()
+    name = (body.get("machine_name") or "").strip()
+    location = (body.get("location") or "").strip()
+    contact = (body.get("contact_phone") or "").strip()
+    try:
+        rate = float(body.get("rate_per_day"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "rate_per_day must be a number"}), 400
+    if mtype not in RENTAL_TYPES:
+        return jsonify({"error": f"machine_type must be one of {list(RENTAL_TYPES)}"}), 400
+    if not name or not location or not contact or rate <= 0:
+        return jsonify({"error": "machine_name, location, contact_phone and positive rate_per_day required"}), 400
+    conn = db.get_db()
+    me = conn.execute("SELECT name FROM farmers WHERE phone=?", (g.phone,)).fetchone()
+    cur = conn.execute(
+        "INSERT INTO rentals (owner_phone, owner_name, machine_type, machine_name, rate_per_day, location, contact_phone) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (g.phone, me["name"] if me else g.phone, mtype, name, rate, location, contact))
+    conn.commit()
+    rid = cur.lastrowid
+    conn.close()
+    return jsonify({"rental_id": rid}), 201
+
+
+@app.post("/v1/rentals/<int:rental_id>/book")
+@require_auth
+def book_rental(rental_id):
+    """Farmer requests a booking. Body: {"days": N, "book_date": "YYYY-MM-DD"}."""
+    body = request.get_json(force=True, silent=True) or {}
+    try:
+        days = int(body.get("days"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "days must be an integer"}), 400
+    book_date = (body.get("book_date") or "").strip()
+    if days < 1 or days > 30 or not book_date:
+        return jsonify({"error": "days 1-30 and book_date required"}), 400
+    conn = db.get_db()
+    rental = conn.execute("SELECT * FROM rentals WHERE id=? AND available=1",
+                          (rental_id,)).fetchone()
+    if not rental:
+        conn.close()
+        return jsonify({"error": "rental not found or unavailable"}), 404
+    me = conn.execute("SELECT name FROM farmers WHERE phone=?", (g.phone,)).fetchone()
+    cur = conn.execute(
+        "INSERT INTO rental_bookings (rental_id, farmer_phone, farmer_name, days, book_date) "
+        "VALUES (?,?,?,?,?)",
+        (rental_id, g.phone, me["name"] if me else g.phone, days, book_date))
+    conn.commit()
+    bid = cur.lastrowid
+    conn.close()
+    total = days * rental["rate_per_day"]
+    return jsonify({"booking_id": bid, "status": "requested",
+                    "total": total,
+                    "message": f"Booking requested. Owner will confirm at {rental['contact_phone']}."}), 201
+
+
+# ---------------- price trends ----------------
+
+@app.get("/v1/prices/trends")
+def price_trends():
+    """Historical lot rates per crop — real data for trend charts.
+    Query: ?crop_code=GOLB&days=30"""
+    crop_code = (request.args.get("crop_code") or "").strip().upper()
+    try:
+        days = int(request.args.get("days", 30))
+    except ValueError:
+        days = 30
+    days = max(7, min(days, 365))
+    conn = db.get_db()
+    q = ("SELECT crop_code, rate_per_kg, date(created_at) as d "
+         "FROM lots WHERE rate_per_kg IS NOT NULL "
+         "AND created_at >= date('now', ?)")
+    params = [f"-{days} days"]
+    if crop_code:
+        q += " AND crop_code=?"; params.append(crop_code)
+    q += " ORDER BY created_at"
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    # Group by crop, then by day (avg rate)
+    by_crop = {}
+    for r in rows:
+        c = r["crop_code"]
+        by_crop.setdefault(c, {}).setdefault(r["d"], []).append(r["rate_per_kg"])
+    result = {}
+    for c, days_map in by_crop.items():
+        result[c] = [{"date": d, "avg_rate": round(sum(v)/len(v), 1), "lots": len(v)}
+                     for d, v in sorted(days_map.items())]
+    return jsonify(result)
+
+
+@app.get("/v1/prices/latest")
+def latest_prices():
+    """Latest rate per crop — for the market overview."""
+    conn = db.get_db()
+    rows = conn.execute(
+        "SELECT crop_code, rate_per_kg, pooled_kg, date(created_at) as d FROM lots "
+        "WHERE rate_per_kg IS NOT NULL AND status='ready' "
+        "ORDER BY created_at DESC").fetchall()
+    conn.close()
+    seen = {}
+    for r in rows:
+        if r["crop_code"] not in seen:
+            seen[r["crop_code"]] = dict(r)
+    return jsonify(seen)
+
+
 # ---------------- admin endpoints ----------------
 
 @app.get("/v1/me")

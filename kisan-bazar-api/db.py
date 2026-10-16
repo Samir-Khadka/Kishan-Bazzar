@@ -90,6 +90,64 @@ CREATE TABLE IF NOT EXISTS orders (
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Bid/offer negotiation on lots. Buyers propose a rate; the co-op (or
+-- staff) can accept, reject, or counter. Accepted offers convert to orders.
+CREATE TABLE IF NOT EXISTS offers (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    lot_id              TEXT NOT NULL REFERENCES lots(id),
+    buyer_phone         TEXT NOT NULL,
+    buyer_name          TEXT NOT NULL,
+    bid_rate_per_kg     REAL NOT NULL,
+    quantity_kg         REAL NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'pending',
+        -- pending | accepted | rejected | countered | withdrawn | converted
+    counter_rate_per_kg REAL,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    decided_at          TEXT
+);
+
+-- Crop Doctor diagnoses. Photos stored as references (not blobs) —
+-- the image bytes live in object storage; we keep metadata + the
+-- symptom text + the matched diagnosis for the farmer's history.
+CREATE TABLE IF NOT EXISTS diagnoses (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    farmer_phone    TEXT,
+    crop_code       TEXT NOT NULL,
+    symptoms        TEXT NOT NULL,
+    photo_ref       TEXT,
+    diagnosis_key   TEXT,
+    diagnosis_text  TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Machinery rentals: owners list equipment, farmers book by day.
+-- Hill-appropriate: power tillers, mini-tillers, threshers, sprayers.
+CREATE TABLE IF NOT EXISTS rentals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_phone     TEXT NOT NULL,
+    owner_name      TEXT NOT NULL,
+    machine_type    TEXT NOT NULL,
+        -- power_tiller | mini_tiller | thresher | sprayer | tractor | harvester | other
+    machine_name    TEXT NOT NULL,
+    rate_per_day    REAL NOT NULL,
+    location        TEXT NOT NULL,
+    contact_phone   TEXT NOT NULL,
+    available       INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS rental_bookings (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    rental_id       INTEGER NOT NULL REFERENCES rentals(id),
+    farmer_phone    TEXT NOT NULL,
+    farmer_name     TEXT NOT NULL,
+    days            INTEGER NOT NULL,
+    book_date       TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'requested',
+        -- requested | confirmed | completed | cancelled
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Every scan a farmer runs is kept, not just the latest — a co-op field
 -- agent revisiting a farmer's plot, or the farmer rescanning after a
 -- season, should be able to see how the read changed, not just overwrite
