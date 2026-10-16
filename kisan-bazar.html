@@ -536,7 +536,9 @@ const DEMO_ACCOUNTS = [
   { name: "Sarita Tamang", phone: "9841000001", role: "किसान (Farmer)", zone: "midhill", land: "khet", icon: "👩‍🌾" },
   { name: "Ram Bahadur K.C.", phone: "9841000002", role: "किसान (Farmer)", zone: "midhill", land: "bari", icon: "👨‍🌾" },
   { name: "Krishna Lama", phone: "9841000004", role: "किसान (Farmer)", zone: "midhill", land: "khet", icon: "🧑‍🌾" },
-  { name: "Kavre Co-op Desk", phone: "9801100000", role: "प्रशासक (Staff/Admin)", zone: "midhill", isStaff: true, icon: "🏢" }
+  { name: "Hari Prasad", phone: "9841000003", role: "क्रेता (Buyer)", zone: "midhill", icon: "🧑‍💼" },
+  // Staff/admin accounts are NEVER listed publicly. Staff log in with their
+  // own phone number; the server identifies them and unlocks the admin panel.
 ];
 
 async function apiRequestCode(phone){
@@ -990,8 +992,10 @@ function header(){
     }
   }
   // Role tabs: when logged in, show only the user's own role panel.
-  // Logged-out visitors can browse farmer/buyer/co-op views; admin is
-  // staff-only and shows a login gate.
+  // Logged-out visitors choose Farmer or Buyer. Admin is NEVER a public
+  // option — staff accounts are created manually, and the server returns
+  // role="staff" on login, which automatically unlocks the admin panel.
+  // Advertising an admin login to the public is a security smell.
   const loggedIn = !!account.token;
   const roles = loggedIn
     ? account.role === "staff"
@@ -1001,9 +1005,7 @@ function header(){
         : [["farmer","किसान","Farmer"]]
     : [
         ["farmer","किसान","Farmer"],
-        ["buyer","किन्ने","Buyer"],
-        ["coop","सहकारी","Co-op"],
-        ["admin","प्रशासक 🛡️","Admin 🛡️"]
+        ["buyer","किन्ने","Buyer"]
       ];
   $("roles").innerHTML = roles.map(([id,ne,en])=>
     `<button class="role" role="tab" aria-selected="${S.role===id}" data-role="${id}">${esc(T(ne,en))}</button>`).join("");
