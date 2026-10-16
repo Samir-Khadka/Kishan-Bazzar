@@ -1444,6 +1444,122 @@ function scrollChatToBottom(){
   }catch(e){ /* best-effort UI polish only */ }
 }
 
+function renderAuthModal(){
+  if(!account.showAuth) return "";
+  const step = account.loginStep || "phone";
+  let body = "";
+  if(step === "phone"){
+    body = `
+      <p class="muted" style="margin-bottom:14px">${esc(T("फोन नम्बरमा OTP कोड पठाइनेछ","An OTP code will be sent to your phone"))}</p>
+      <label style="font-weight:600;font-size:14px">${esc(T("मोबाइल नम्बर","Mobile number"))}</label>
+      <input id="auth-phone" type="tel" inputmode="numeric" placeholder="98XXXXXXXX" maxlength="10" value="${esc(account.phone||"")}"
+        style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin:6px 0 12px">
+      <div style="font-weight:600;font-size:14px;margin-bottom:6px">${esc(T("भूमिका छान्नुहोस्","Choose your role"))}</div>
+      <div class="modeToggle" style="margin-bottom:14px">
+        <button data-authrole="farmer" aria-pressed="${account.pendingRole!=="buyer"}">🧑‍🌾 ${esc(T("किसान","Farmer"))}</button>
+        <button data-authrole="buyer" aria-pressed="${account.pendingRole==="buyer"}">🧑‍💼 ${esc(T("क्रेता","Buyer"))}</button>
+      </div>
+      ${account.lastError?`<p style="color:var(--alert);font-size:14px;margin-bottom:10px">${esc(account.lastError)}</p>`:""}
+      <button class="btn primary" style="width:100%;padding:13px" onclick="doAuthRequestCode()" ${account.busy?"disabled":""}>
+        ${account.busy?esc(T("पठाउँदै…","Sending…")):esc(T("OTP पठाउनुहोस्","Send OTP"))}</button>
+      <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+        <div style="font-size:13px;color:var(--ink-2);margin-bottom:8px">${esc(T("डेमो खाता:","Demo accounts:"))}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${DEMO_ACCOUNTS.map((a,i)=>`<button class="chipbtn" style="font-size:13px" onclick="useDemoAccount(${i})">${a.icon} ${esc(a.name.split(" ")[0])}</button>`).join("")}
+        </div>
+      </div>`;
+  } else if(step === "code_sent"){
+    body = `
+      <p class="muted" style="margin-bottom:14px">${esc(T("कोड पठाइयो:","Code sent to:"))} <b>${esc(account.phone)}</b></p>
+      <label style="font-weight:600;font-size:14px">${esc(T("OTP कोड","OTP code"))}</label>
+      <input id="auth-code" type="text" inputmode="numeric" placeholder="••••••" maxlength="6" value="${esc(account.codeDraft||"")}"
+        style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:20px;letter-spacing:6px;text-align:center;margin:6px 0 12px">
+      ${account.lastError?`<p style="color:var(--alert);font-size:14px;margin-bottom:10px">${esc(account.lastError)}</p>`:""}
+      <button class="btn primary" style="width:100%;padding:13px" onclick="doAuthVerifyCode()" ${account.busy?"disabled":""}>
+        ${account.busy?esc(T("जाँच्दै…","Verifying…")):esc(T("लगइन गर्नुहोस्","Log in"))}</button>
+      <button class="btn" style="width:100%;margin-top:8px" onclick="account.loginStep='phone';account.lastError=null;render({skipScroll:true})">
+        ${esc(T("← नम्बर परिवर्तन","← Change number"))}</button>`;
+  } else if(step === "register"){
+    body = `
+      <p class="muted" style="margin-bottom:14px">${esc(T("नयाँ खाता — विवरण भर्नुहोस्","New account — fill in your details"))}</p>
+      <label style="font-weight:600;font-size:14px">${esc(T("नाम","Name"))}</label>
+      <input id="auth-name" type="text" placeholder="${esc(T("तपाईंको नाम","Your name"))}" value="${esc(account.name||"")}"
+        style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin:6px 0 12px">
+      ${account.lastError?`<p style="color:var(--alert);font-size:14px;margin-bottom:10px">${esc(account.lastError)}</p>`:""}
+      <button class="btn primary" style="width:100%;padding:13px" onclick="doAuthRegister()" ${account.busy?"disabled":""}>
+        ${esc(T("दर्ता गर्नुहोस्","Register"))}</button>`;
+  }
+  return `<div class="modalOverlay" onclick="if(event.target===this)closeAuth()">
+    <div class="modalCard">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3 style="margin:0">${esc(T("लगइन / दर्ता","Login / Register"))}</h3>
+        <button class="modalClose" onclick="closeAuth()">×</button>
+      </div>
+      ${body}
+    </div>
+  </div>`;
+}
+
+function openAuth(){ account.showAuth = true; account.lastError = null; render({skipScroll:true}); }
+function closeAuth(){ account.showAuth = false; account.lastError = null; render({skipScroll:true}); }
+async function doAuthRequestCode(){
+  const phone = ($("auth-phone")||{}).value || "";
+  account.pendingRole = account.pendingRole || "farmer";
+  await doRequestCode(phone);
+}
+async function doAuthVerifyCode(){
+  const code = (($("auth-code")||{}).value || "").trim();
+  if(code.length < 4){ account.lastError = T("सही कोड हाल्नुहोस्","Enter the correct code"); render({skipScroll:true}); return; }
+  account.busy = true; account.lastError = null; render({skipScroll:true});
+  try{
+    const data = await apiVerifyCode(account.phone, code);
+    account.token = data.token; account.loginStep = "idle"; account.codeDraft = "";
+    account.showAuth = false; account.busy = false;
+    // Fetch profile to get role (staff auto-unlocks admin)
+    try{
+      const me = await apiGetMe(account.token);
+      account.name = me.name || ""; account.isStaff = !!me.isStaff;
+      account.role = me.role || (me.isStaff ? "staff" : (account.pendingRole || "farmer"));
+      saveAccount();
+      S.role = account.role === "buyer" ? "buyer" : account.role === "staff" ? "admin" : "farmer";
+      S.tab = TABS[S.role][0][0];
+    }catch(e){}
+    saveAccount(); render();
+    toast(T("स्वागत छ!","Welcome!"));
+  }catch(e){
+    account.busy = false;
+    account.lastError = T("गलत कोड। पुनः प्रयास गर्नुहोस्।","Wrong code. Try again.");
+    render({skipScroll:true});
+  }
+}
+async function doAuthRegister(){
+  const name = (($("auth-name")||{}).value || "").trim();
+  if(name.length < 2){ account.lastError = T("नाम लेख्नुहोस्","Enter your name"); render({skipScroll:true}); return; }
+  account.busy = true; render({skipScroll:true});
+  try{
+    await apiRegister(account.phone, name, account.pendingRole || "farmer");
+    account.name = name; account.role = account.pendingRole || "farmer";
+    account.loginStep = "idle"; account.showAuth = false; account.busy = false;
+    saveAccount();
+    S.role = account.role === "buyer" ? "buyer" : "farmer";
+    S.tab = TABS[S.role][0][0];
+    render(); toast(T("दर्ता सफल!","Registered!"));
+  }catch(e){
+    account.busy = false;
+    account.lastError = T("दर्ता हुन सकेन।","Registration failed.");
+    render({skipScroll:true});
+  }
+}
+function useDemoAccount(i){
+  const a = DEMO_ACCOUNTS[i];
+  if(!a) return;
+  account.phone = a.phone; account.pendingRole = a.role.includes("Buyer") ? "buyer" : "farmer";
+  account.loginStep = "phone";
+  render({skipScroll:true});
+  setTimeout(()=>{ const el = $("auth-phone"); if(el){ el.value = a.phone; } }, 50);
+  toast(a.name + " · " + a.phone);
+}
+
 function renderSahayak(){
   ensureGreeting();
   const badge = (!chat.open && !sahayakSeen) ? '<span class="fabBadge" aria-hidden="true"></span>' : "";
@@ -2535,6 +2651,7 @@ function render(opts){
   header(); nav();
   $("main").innerHTML = (VIEWS[S.tab]||viewToday)();
   $("sahayakRoot").innerHTML = renderSahayak() + renderOfferDialog();
+  $("authModalRoot").innerHTML = renderAuthModal();
   // chat interactions re-render too (new message, opening the panel) but
   // must NOT jump the whole page back to top the way a tab switch should —
   // callers that only touch chat state pass skipScroll.
@@ -2549,12 +2666,16 @@ document.addEventListener("click", e=>{
 
   if(t.id==="langNe" || t.id==="langEn"){ L = t.id==="langNe"?"ne":"en"; store.set("lang",L); render(); return; }
   if(t.id==="authBtn"){
-    // Header login button: jump to the Mine tab where the login UI lives.
-    // (There is no separate modal; the Mine tab hosts phone/OTP login.)
-    S.role = "farmer"; S.tab = "mine"; render();
-    try{ const inp=$("phoneInput"); if(inp) inp.focus(); }catch(e){}
+    if(account.token){
+      // Logged in: jump to Mine tab (profile/logout lives there)
+      S.role = account.role === "buyer" ? "buyer" : account.role === "staff" ? "admin" : "farmer";
+      S.tab = "mine"; render();
+    } else {
+      openAuth();
+    }
     return;
   }
+  if(t.dataset.authrole){ account.pendingRole = t.dataset.authrole; render({skipScroll:true}); return; }
   if(t.dataset.role){ S.role=t.dataset.role; S.tab=TABS[S.role][0][0]; render(); return; }
   if(t.dataset.tab){ S.tab=t.dataset.tab; render(); return; }
   if(t.dataset.speak!==undefined){ speak(t.dataset.speak); return; }

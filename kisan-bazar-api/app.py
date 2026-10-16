@@ -234,10 +234,10 @@ def serve_site(filename="index.html"):
     site_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "website")
     # Only serve safe static types
     if not re.fullmatch(r"[a-zA-Z0-9._/-]+\.(html|css|js|png|jpg|svg|ico)", filename):
-        return jsonify({"error": "not found"}), 404
+        return send_from_directory(site_dir, "404.html"), 404
     full = os.path.join(site_dir, filename)
     if not os.path.isfile(full) or not os.path.realpath(full).startswith(os.path.realpath(site_dir)):
-        return jsonify({"error": "not found"}), 404
+        return send_from_directory(site_dir, "404.html"), 404
     return send_from_directory(site_dir, filename)
 
 

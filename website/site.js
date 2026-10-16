@@ -12,6 +12,9 @@ function applyLang(){
   document.querySelectorAll("[data-ne]").forEach(el=>{
     el.textContent = el.dataset[LANG === "ne" ? "ne" : "en"];
   });
+  document.querySelectorAll("[data-aria-ne]").forEach(el=>{
+    el.setAttribute("aria-label", el.dataset[LANG === "ne" ? "ariaNe" : "ariaEn"]);
+  });
   // Re-render dynamic lot cards so they follow the language toggle
   const ml = document.getElementById("market-lots");
   if(ml) loadMarketLots(ml);
