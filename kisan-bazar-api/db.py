@@ -183,9 +183,14 @@ CREATE INDEX IF NOT EXISTS auth_codes_phone_idx ON auth_codes (phone, created_at
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL mode: readers don't block writers — critical for multi-worker deploys.
+    # Without this, concurrent gunicorn workers serialize on every write.
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA synchronous = NORMAL")
     return conn
 
 
@@ -203,5 +208,21 @@ def init_db(fresh: bool = False):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
     # Backfill: existing staff keep staff role.
     conn.execute("UPDATE farmers SET role='staff' WHERE is_staff=1 AND role='farmer'")
+    # Indexes for common query patterns — without these, every list endpoint
+    # does a full table scan. Critical as data grows.
+    for idx_sql in [
+        "CREATE INDEX IF NOT EXISTS idx_listings_farmer ON listings(farmer_phone)",
+        "CREATE INDEX IF NOT EXISTS idx_listings_crop ON listings(crop_code)",
+        "CREATE INDEX IF NOT EXISTS idx_lots_status ON lots(status)",
+        "CREATE INDEX IF NOT EXISTS idx_lots_coop ON lots(coop_id)",
+        "CREATE INDEX IF NOT EXISTS idx_orders_buyer ON orders(buyer_phone)",
+        "CREATE INDEX IF NOT EXISTS idx_orders_lot ON orders(lot_id)",
+        "CREATE INDEX IF NOT EXISTS idx_offers_lot ON offers(lot_id)",
+        "CREATE INDEX IF NOT EXISTS idx_offers_buyer ON offers(buyer_phone)",
+        "CREATE INDEX IF NOT EXISTS idx_diagnoses_farmer ON diagnoses(farmer_phone)",
+        "CREATE INDEX IF NOT EXISTS idx_rentals_type ON rentals(machine_type)",
+        "CREATE INDEX IF NOT EXISTS idx_bookings_rental ON rental_bookings(rental_id)",
+    ]:
+        conn.execute(idx_sql)
     conn.commit()
     conn.close()

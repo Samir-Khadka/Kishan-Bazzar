@@ -118,7 +118,9 @@ def set_security_headers(resp):
     # job — noted in the security doc, not silently assumed to be handled.
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
-    resp.headers["Cache-Control"] = "no-store"
+    # Don't override an endpoint's own Cache-Control (e.g. public stats).
+    if "Cache-Control" not in resp.headers:
+        resp.headers["Cache-Control"] = "no-store"
 
     # CORS: the app that calls this API is necessarily served from a
     # different origin (a published artifact link, not this API's own
@@ -454,6 +456,13 @@ def my_listings():
 def list_lots():
     coop_id = request.args.get("coop_id")
     status = request.args.get("status")
+    # Pagination: default 50, max 200. Prevents one request from dumping
+    # the entire table as data grows.
+    try:
+        limit = min(int(request.args.get("limit", 50)), 200)
+        offset = max(int(request.args.get("offset", 0)), 0)
+    except ValueError:
+        return jsonify({"error": "invalid pagination params"}), 400
     conn = db.get_db()
     query = "SELECT * FROM lots WHERE 1=1"
     params = []
@@ -463,9 +472,15 @@ def list_lots():
     if status:
         query += " AND status=?"
         params.append(status)
+    total = conn.execute(f"SELECT COUNT(*) as c FROM ({query})", params).fetchone()["c"]
+    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
     rows = conn.execute(query, params).fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify({
+        "data": [dict(r) for r in rows],
+        "total": total, "limit": limit, "offset": offset,
+    })
 
 
 @app.post("/v1/lots/<lot_id>/confirm")
@@ -1008,7 +1023,11 @@ def public_stats():
     coops = conn.execute("SELECT COUNT(*) as c FROM cooperatives").fetchone()["c"]
     lots = conn.execute("SELECT COUNT(*) as c FROM lots WHERE status='ready'").fetchone()["c"]
     conn.close()
-    return jsonify({"farmers": farmers, "coops": coops, "active_lots": lots})
+    resp = jsonify({"farmers": farmers, "coops": coops, "active_lots": lots})
+    # Cacheable for 60s — stats don't change every second, and this endpoint
+    # is hit by every website visitor. Reduces DB load under traffic.
+    resp.headers["Cache-Control"] = "public, max-age=60"
+    return resp
 
 
 # ---------------- admin endpoints ----------------

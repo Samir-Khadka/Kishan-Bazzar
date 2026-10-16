@@ -906,11 +906,13 @@ async function loadLots(){
   try{
     const res = await fetch(`${BACKEND.baseUrl}/v1/lots`);
     if(!res.ok) throw new Error(res.status);
-    const data = await res.json();
+    const payload = await res.json();
+    // Paginated response: {data, total, limit, offset}. Unwrap for compat.
+    const data = Array.isArray(payload) ? payload : (payload.data || []);
     // Backend is source of truth when connected — even if empty.
     // Showing demo data alongside an empty API is a data contradiction
     // that destroys trust. Demo lots only exist in offline mode.
-    const live = (Array.isArray(data) ? data : []).filter(l=>l.status==="ready").map(l=>({
+    const live = data.filter(l=>l.status==="ready").map(l=>({
       id: l.id, crop: l.crop_code, coop: l.coop_name || "सहकारी", coopEn: l.coop_name_en || "Co-op",
       kg: l.pooled_kg, rate: l.rate_per_kg, farmers: l.farmer_count || 0,
       day: "बिहीबार", dayEn: "Thursday", dist: "", distEn: "",

@@ -32,7 +32,9 @@ document.addEventListener("DOMContentLoaded", ()=>{
 async function api(path){
   const r = await fetch(API + path);
   if(!r.ok) throw new Error(r.status);
-  return r.json();
+  const payload = await r.json();
+  // Unwrap paginated responses: {data, total, ...} -> data array
+  return Array.isArray(payload) ? payload : (payload.data !== undefined ? payload.data : payload);
 }
 
 const CROP_ICON = {GOLB:"🍅", KAULI:"🥦", ALU:"🥔", PYAJ:"🧅", ADUWA:"🫚", ALAICHI:"🌰",
