@@ -65,6 +65,27 @@ CROPS = {
     "radish":     ("मुला",    "Radish",     ["mula", "moola"], "🥕"),
 }
 
+# Colloquial/alternate Devanagari names people actually type.
+# The formal name (गोलभेँडा) is in CROPS; people say टमाटर.
+NE_ALIASES = {
+    "टमाटर": "tomato", "टमाटरको": "tomato",
+    "आलु": "potato", "आलुको": "potato",
+    "प्याज": "onion", "प्याजको": "onion",
+    "काउली": "cauliflower", "काउलीको": "cauliflower",
+    "अदुवा": "ginger", "अदुवाको": "ginger",
+    "मकै": "maize", "मकैको": "maize",
+    "धान": "paddy", "धानको": "paddy",
+    "गहुँ": "wheat", "गहुँको": "wheat",
+    "तोरी": "mustard", "तोरीको": "mustard",
+    "मुसुरो": "lentil", "दाल": "lentil",
+    "स्याउ": "apple", "स्याउको": "apple",
+    "जुनार": "junar", "सुन्तला": "junar",
+    "मुला": "radish", "मुलाको": "radish",
+    "केराउ": "pea", "मटर": "pea",
+    "फापर": "buckwheat",
+    "अलैँची": "cardamom", "अलैची": "cardamom",
+}
+
 # ---------------------------------------------------------------------------
 # Language detection
 # ---------------------------------------------------------------------------
@@ -108,10 +129,13 @@ def extract_crops(text):
     """Return list of crop codes mentioned, in order of appearance."""
     found = []
     lower = text.lower()
-    # Devanagari names
+    # Devanagari names (formal + colloquial aliases)
     for code, (ne, _en, _al, _ic) in CROPS.items():
         if ne in text and code not in found:
             found.append((text.index(ne), code))
+    for ne_alias, code in NE_ALIASES.items():
+        if ne_alias in text and code not in [c for _, c in found]:
+            found.append((text.index(ne_alias), code))
     # English names
     for code, (_ne, en, _al, _ic) in CROPS.items():
         idx = lower.find(en.lower())
