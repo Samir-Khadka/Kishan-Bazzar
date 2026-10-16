@@ -1,5 +1,5 @@
 /* Shared site JS: language toggle + live API data */
-const API = "https://kishan-bazzar.onrender.com";
+const API = "";  // same origin — API lives at /v1/* alongside /site/*
 let LANG = localStorage.getItem("kb-lang") || "ne";
 
 function toggleLang(){

@@ -224,6 +224,23 @@ def serve_index():
     return jsonify({"service": "kisan-bazar-api", "status": "running"})
 
 
+# ---------------- public website ----------------
+# Static marketing site served under /site/. The app itself stays at /.
+
+@app.get("/site/")
+@app.get("/site/<path:filename>")
+def serve_site(filename="index.html"):
+    from flask import send_from_directory
+    site_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "website")
+    # Only serve safe static types
+    if not re.fullmatch(r"[a-zA-Z0-9._/-]+\.(html|css|js|png|jpg|svg|ico)", filename):
+        return jsonify({"error": "not found"}), 404
+    full = os.path.join(site_dir, filename)
+    if not os.path.isfile(full) or not os.path.realpath(full).startswith(os.path.realpath(site_dir)):
+        return jsonify({"error": "not found"}), 404
+    return send_from_directory(site_dir, filename)
+
+
 # ---------------- auth endpoints ----------------
 
 @app.post("/v1/auth/request-code")
