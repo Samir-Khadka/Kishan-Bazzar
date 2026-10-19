@@ -94,18 +94,23 @@ def _ensure_db_ready():
                 conn = db.get_db()
                 lot_count = conn.execute("SELECT COUNT(*) AS n FROM lots").fetchone()["n"]
                 if lot_count == 0:
-                    lots = [
-                        ("KVR-118", "kavre-veg", "KAULI", "A", 500, 410, 58, "ready"),
-                        ("DHD-207", "kavre-veg", "GOLB", "A", 350, 300, 48, "ready"),
-                        ("ILM-044", "kavre-veg", "ALAICHI", "A", 30, 25, 1450, "ready"),
-                        ("MST-012", "kavre-veg", "SYAU", "A", 200, 150, 138, "ready"),
-                        ("SND-091", "kavre-veg", "JUNAR", "B", 250, 200, 95, "ready"),
-                    ]
-                    conn.executemany(
-                        "INSERT INTO lots (id, coop_id, crop_code, grade, target_kg, pooled_kg, rate_per_kg, status) "
-                        "VALUES (?,?,?,?,?,?,?,?)", lots
-                    )
-                    conn.commit()
+                    # Only insert demo lots if the kavre-veg coop exists (FK guard)
+                    coop_exists = conn.execute(
+                        "SELECT 1 FROM cooperatives WHERE id='kavre-veg'"
+                    ).fetchone()
+                    if coop_exists:
+                        lots = [
+                            ("KVR-118", "kavre-veg", "KAULI", "A", 500, 410, 58, "ready"),
+                            ("DHD-207", "kavre-veg", "GOLB", "A", 350, 300, 48, "ready"),
+                            ("ILM-044", "kavre-veg", "ALAICHI", "A", 30, 25, 1450, "ready"),
+                            ("MST-012", "kavre-veg", "SYAU", "A", 200, 150, 138, "ready"),
+                            ("SND-091", "kavre-veg", "JUNAR", "B", 250, 200, 95, "ready"),
+                        ]
+                        conn.executemany(
+                            "INSERT OR IGNORE INTO lots (id, coop_id, crop_code, grade, target_kg, pooled_kg, rate_per_kg, status) "
+                            "VALUES (?,?,?,?,?,?,?,?)", lots
+                        )
+                        conn.commit()
                 conn.close()
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
@@ -384,9 +389,6 @@ def dev_latest_code(phone):
     return jsonify({"error": "no code found"}), 404
 
 
-@app.post("/v1/auth/verify")
-
-
 @app.post("/v1/auth/admin")
 def admin_login():
     """Password login for the site owner/admin. Separate from the OTP flow
@@ -418,6 +420,9 @@ def admin_login():
         "token": token, "phone": row["phone"], "name": row["name"],
         "role": row["role"],
     })
+
+
+@app.post("/v1/auth/verify")
 def verify():
     body = request.get_json(force=True, silent=True) or {}
     phone = body.get("phone")
@@ -590,18 +595,29 @@ def list_lots():
     except ValueError:
         return jsonify({"error": "invalid pagination params"}), 400
     conn = db.get_db()
-    query = "SELECT * FROM lots WHERE 1=1"
+    # Join cooperatives for display name + count distinct contributing farmers
+    # via lot_listings -> listings, so the frontend doesn't render placeholders.
+    base = (
+        "FROM lots l "
+        "LEFT JOIN cooperatives c ON l.coop_id = c.id "
+        "WHERE 1=1"
+    )
     params = []
     if coop_id:
-        query += " AND coop_id=?"
+        base += " AND l.coop_id=?"
         params.append(coop_id)
     if status:
-        query += " AND status=?"
+        base += " AND l.status=?"
         params.append(status)
-    total = conn.execute(f"SELECT COUNT(*) as c FROM ({query})", params).fetchone()["c"]
-    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
-    rows = conn.execute(query, params).fetchall()
+    total = conn.execute(f"SELECT COUNT(*) as c {base}", params).fetchone()["c"]
+    rows = conn.execute(
+        "SELECT l.*, c.name AS coop_name, "
+        "(SELECT COUNT(DISTINCT li.farmer_phone) FROM lot_listings ll "
+        " JOIN listings li ON ll.listing_id = li.id "
+        " WHERE ll.lot_id = l.id) AS farmer_count "
+        f"{base} ORDER BY l.created_at DESC LIMIT ? OFFSET ?",
+        params + [limit, offset],
+    ).fetchall()
     conn.close()
     return jsonify({
         "data": [dict(r) for r in rows],

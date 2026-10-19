@@ -117,7 +117,7 @@ def run():
                         headers={"Authorization": f"Bearer {tok}"})
         assert r.status_code == 201, r.get_json()
     r = client.get("/v1/lots", headers={"Authorization": f"Bearer {staff_token}"})
-    lots = [l for l in r.get_json() if l["status"] == "forming" and l["crop_code"] == "KAULI"]
+    lots = [l for l in r.get_json()["data"] if l["status"] == "forming" and l["crop_code"] == "KAULI"]
     assert lots, "expected a forming KAULI lot"
     lot_id = lots[0]["id"]
     # Staff prices the lot -> status becomes 'ready' and orderable.
@@ -125,7 +125,7 @@ def run():
                     headers={"Authorization": f"Bearer {staff_token}"})
     assert r.status_code == 200, r.get_json()
     r = client.get("/v1/lots", headers={"Authorization": f"Bearer {staff_token}"})
-    lot = [l for l in r.get_json() if l["id"] == lot_id][0]
+    lot = [l for l in r.get_json()["data"] if l["id"] == lot_id][0]
     assert lot["status"] == "ready", lot
     pooled = lot["pooled_kg"]
     r = client.post("/v1/orders", json={"buyer_name": "Hotel Yak", "buyer_phone": "9800000001",

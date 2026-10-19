@@ -48,7 +48,8 @@
   const notFound = langNe ? "लट भेटिएन।" : "Lot not found.";
   if(!id){ box.innerHTML = `<p>${notFound}</p>`; return; }
   try{
-    const lots = await (await fetch("/v1/lots")).json();
+    const payload = await (await fetch("/v1/lots")).json();
+    const lots = Array.isArray(payload) ? payload : (payload.data || []);
     const l = (lots||[]).find(x=>String(x.id)===String(id));
     if(!l){ box.innerHTML = `<p>${notFound}</p>`; return; }
     const ne = langNe;

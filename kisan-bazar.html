@@ -559,6 +559,17 @@ async function apiVerifyCode(phone, code){
   return data; // {token, expires_in_seconds}
 }
 
+async function apiRegister(phone, name, role){
+  const res = await fetch(`${BACKEND.baseUrl}/v1/auth/signup`, {
+    method: "POST",
+    headers: {"Content-Type":"application/json", "Authorization": `Bearer ${account.token}`},
+    body: JSON.stringify({phone, name, role})
+  });
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || `register failed (${res.status})`);
+  return data;
+}
+
 async function apiCreateListing(token, payload){
   const res = await fetch(`${BACKEND.baseUrl}/v1/listings`, {
     method: "POST",
@@ -915,7 +926,7 @@ async function loadLots(){
     // Showing demo data alongside an empty API is a data contradiction
     // that destroys trust. Demo lots only exist in offline mode.
     const live = data.filter(l=>l.status==="ready").map(l=>({
-      id: l.id, crop: l.crop_code, coop: l.coop_name || "सहकारी", coopEn: l.coop_name_en || "Co-op",
+      id: l.id, crop: CROP_CODE_MAP[l.crop_code] || l.crop_code, coop: l.coop_name || "सहकारी", coopEn: l.coop_name_en || "Co-op",
       kg: l.pooled_kg, rate: l.rate_per_kg, farmers: l.farmer_count || 0,
       day: "बिहीबार", dayEn: "Thursday", dist: "", distEn: "",
       _live: true
@@ -1547,8 +1558,7 @@ async function doAdminLogin(){
     account.token = data.token; account.phone = data.phone;
     account.name = data.name; account.role = "staff";
     account.showAuth = false; account.loginStep = "phone"; account.lastError = null;
-    store.set("token", data.token); store.set("phone", data.phone);
-    store.set("name", data.name); store.set("role", "staff");
+    account.isStaff = true; saveAccount();
     S.role = "admin"; S.tab = "admin_overview";
     toast(T("प्रशासकको रूपमा लगइन भयो","Logged in as admin"));
   }catch(e){
@@ -2145,7 +2155,7 @@ function viewMarket(){
       <div class="warn-sub">${esc(T("मंगलबार अर्डर → बुधबार टिप्ने → बिहीबार डेलिभरी।","Order Tuesday → picked Wednesday → delivered Thursday."))}</div>
     </div>
     ${LOTS.map(l=>{
-      const c=CROPS[l.crop], q=S.cart[l.id]||0;
+      const c=CROPS[l.crop]||{}, q=S.cart[l.id]||0;
       return `<div class="card" style="padding:0">
         <div class="item" style="border:0">
           <div class="em" aria-hidden="true">${c.ic}</div>
@@ -2256,11 +2266,13 @@ async function doPlaceOrder(){
 
   if(!BACKEND.enabled){
     // Offline demo: can't place real orders.
+    _ordering = false;
     toast(T("अर्डर गर्न लगइन र इन्टरनेट चाहिन्छ","Login and internet needed to order"));
     S.role = "farmer"; S.tab = "mine"; render();
     return;
   }
   if(!buyerPhone){
+    _ordering = false;
     toast(T("पहिले क्रेताको रूपमा लगइन गर्नुहोस्","Please log in as a buyer first"));
     S.role = "farmer"; S.tab = "mine"; render();
     return;
@@ -2306,7 +2318,7 @@ function viewCart(){
     ${esc(T("बजारबाट लट छान्नुहोस्।","Pick a lot from the market."))}</div>`;
   return `<div class="stack">
     <div class="card" style="padding:0">
-    ${rows.map(([id,q])=>{const l=LOTS.find(x=>x.id===id), c=CROPS[l.crop];
+    ${rows.map(([id,q])=>{const l=LOTS.find(x=>x.id===id), c=CROPS[l.crop]||{};
       return `<div class="item"><div class="em">${c.ic}</div><div class="bd">
         <b>${esc(T(c.ne,c.en))} · ${esc(N(q))} ${esc(T("के.जी.","kg"))}</b>
         <p>${esc(T(l.coop,l.coopEn))} · ${esc(T(l.day,l.dayEn))}</p></div>
