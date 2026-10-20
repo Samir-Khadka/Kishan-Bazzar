@@ -149,7 +149,9 @@ async function main() {
     const o4 = await listViaApp("cauliflower", 44, "A");
     check("farmer 4: 44kg tips the in-radius pool past 130kg -> app shows a formed lot", o4.status === "lot" && typeof o4.lot === "string", JSON.stringify(o4));
 
-    const lots = await (await fetch(`${BASE}/v1/lots?coop_id=kavre-veg`)).json();
+    // /v1/lots is paginated ({data, total, limit, offset}) — unwrap like the app's loadLots() does
+    const lotsPayload = await (await fetch(`${BASE}/v1/lots?coop_id=kavre-veg`)).json();
+    const lots = Array.isArray(lotsPayload) ? lotsPayload : (lotsPayload.data || []);
     const lot = lots.find(l => l.id === o4.lot);
     check("server confirms that lot exists, for cauliflower KAULI", lot && lot.crop_code === "KAULI", JSON.stringify(lots));
     check("server pooled exactly the 130kg target (not 134, not 234)", lot && lot.pooled_kg === 130, lot && String(lot.pooled_kg));

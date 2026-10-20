@@ -1,4 +1,4 @@
-const { A } = require("./harness");
+const { A, sandbox, evalInApp } = require("./harness");
 let failures = 0, passed = 0;
 
 function check(label, cond, detail) {
@@ -166,5 +166,124 @@ console.log("\n=== land-scan flow inside viewAdvice — scanPending must suppres
   A.scan.mode = "manual"; // reset for any tests that run after this one
 }
 
+(async function newTests(){
+console.log("\n=== refreshOnce()/isStale() — background refresh must not re-render in a loop (2026-10-20) ===");
+{
+  // The old pattern was fetchX().then(()=>render()) called from INSIDE a
+  // view function on every render: fetch helpers resolve from cache almost
+  // immediately, so this was an infinite render->fetch->render microtask
+  // loop that starved the event loop (it hung the JS integration test).
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  A.BACKEND.enabled = true;
+  A.BACKEND.baseUrl = "http://127.0.0.1:9"; // nothing listens — all fetches fail fast
+  evalInApp("L = 'ne'");
+
+  // fresh cache: rendering must trigger ZERO fetches
+  evalInApp("trendsCache = {data: {GOLB: [{avg_rate: 40}]}, at: Date.now()}");
+  let trendsCalls = 0;
+  sandbox.fetch = async (url) => { if (String(url).includes("/v1/prices/trends")) trendsCalls++; throw new Error("no server"); };
+  const html1 = A.renderPriceTrends();
+  check("fresh cache: renderPriceTrends() triggers no fetch", trendsCalls === 0, `got ${trendsCalls}`);
+  check("fresh cache: still renders the trend section", html1.includes("भाउको ट्रेन्ड"));
+
+  // stale cache: three renders must trigger exactly one fetch, then stop
+  evalInApp("trendsCache = {data: null, at: 0}");
+  trendsCalls = 0;
+  sandbox.fetch = async (url) => { trendsCalls++; throw new Error("no server"); };
+  A.viewToday(); A.viewToday(); A.viewToday();
+  await sleep(100);
+  check("stale cache: three renders trigger exactly one background fetch (no loop)", trendsCalls === 1, `got ${trendsCalls}`);
+  check("isStale() is false on a just-filled cache", A.isStale({data: {x: 1}, at: Date.now()}, 120000) === false);
+  check("isStale() is true when data is null", A.isStale({data: null, at: 0}, 120000) === true);
+
+  // same guard for the rental + offers views
+  let rentCalls = 0, offerCalls = 0, adminCalls = 0;
+  sandbox.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("/v1/rentals")) rentCalls++;
+    if (u.match(/\/v1\/offers(\?|$)/)) offerCalls++;
+    throw new Error("no server");
+  };
+  evalInApp("rentalsCache = {data: null, at: 0}; myOffersCache = {data: null, at: 0}");
+  Object.assign(A.account, {token: "t", role: "buyer", phone: "9841000001"});
+  A.viewRental(); A.viewRental();
+  A.viewMyOffers(); A.viewMyOffers();
+  await sleep(100);
+  check("viewRental() x2 triggers one rentals fetch, not a loop", rentCalls === 1, `got ${rentCalls}`);
+  check("viewMyOffers() x2 triggers one offers fetch, not a loop", offerCalls === 1, `got ${offerCalls}`);
+  A.BACKEND.enabled = false;
+}
+
+console.log("\n=== handlePostBtn() stores a canonical day marker so EN/NE toggling keeps working ===");
+{
+  A.BACKEND.enabled = true;
+  A.BACKEND.baseUrl = "http://127.0.0.1:9";
+  evalInApp("L = 'ne'; sell = {crop:'tomato', kg:20, grade:'A', posting:false}");
+  Object.assign(A.account, {token: "t", phone: "9841000001"});
+  sandbox.fetch = async (url) => {
+    if (String(url).includes("/v1/listings")) return {ok: true, json: async () => ({listing_id: "L-1"})};
+    throw new Error("no server");
+  };
+  await A.handlePostBtn();
+  const posted = A.S.offers[0];
+  check("posted offer stores day:'today' (canonical), not the localized string", posted.day === "today", `got ${JSON.stringify(posted.day)}`);
+  check("posted offer is marked synced:true on server success", posted.synced === true);
+  evalInApp("L = 'ne'");
+  check("offerRow renders canonical 'today' as आज in Nepali", A.offerRow(posted).includes("आज"));
+  evalInApp("L = 'en'");
+  check("offerRow renders canonical 'today' as Today in English (no leaked Devanagari)", A.offerRow(posted).includes("Today") && !A.offerRow(posted).includes("आज"));
+  check("offerRow does not crash on a corrupt crop key", (() => { try { A.offerRow({crop: "zzz", kg: 1, grade: "A", status: "new", lot: null, day: "today", rate: 1}); return true; } catch { return false; } })());
+  evalInApp("L = 'ne'");
+  A.BACKEND.enabled = false;
+}
+
+console.log("\n=== doPlaceOrder() keeps failed lines in the cart on partial success ===");
+{
+  A.BACKEND.enabled = true;
+  A.BACKEND.baseUrl = "http://127.0.0.1:9";
+  Object.assign(A.account, {token: "t", role: "buyer", phone: "9841000001", name: "Buyer"});
+  evalInApp(`LOTS = [
+    {id:'L1', crop:'tomato', kg:100, rate:50, coop:'c', coopEn:'c', farmers:1, day:'d', dayEn:'d', dist:'', distEn:''},
+    {id:'L2', crop:'potato', kg:100, rate:40, coop:'c', coopEn:'c', farmers:1, day:'d', dayEn:'d', dist:'', distEn:''}
+  ]`);
+  A.S.cart = {L1: 10, L2: 5};
+  const seen = [];
+  sandbox.fetch = async (url, opts) => {
+    const body = JSON.parse(opts.body);
+    seen.push(body.lot_id);
+    if (body.lot_id === "L1") return {ok: true, json: async () => ({})};
+    return {ok: false, status: 409, json: async () => ({error: "oversold"})};
+  };
+  await A.doPlaceOrder();
+  check("successful lot L1 leaves the cart", !("L1" in A.S.cart), JSON.stringify(A.S.cart));
+  check("failed lot L2 stays in the cart for retry", A.S.cart.L2 === 5, JSON.stringify(A.S.cart));
+  check("both lots were attempted", seen.includes("L1") && seen.includes("L2"), JSON.stringify(seen));
+  A.BACKEND.enabled = false;
+}
+
+console.log("\n=== doSubmitOffer() sends the buyer token when logged in ===");
+{
+  A.BACKEND.enabled = true;
+  A.BACKEND.baseUrl = "http://127.0.0.1:9";
+  Object.assign(A.account, {token: "tok123", role: "buyer", phone: "9841000001", name: "Buyer"});
+  evalInApp("S.offerDialog = {lotId: 'L1', rate: 55, qty: 10}");
+  let authHeader = null, payload = null;
+  const realGet = sandbox.document.getElementById;
+  sandbox.document.getElementById = (id) =>
+    id === "offerRate" ? {value: "55"} : id === "offerQty" ? {value: "10"} : realGet(id);
+  sandbox.fetch = async (url, opts) => {
+    authHeader = opts.headers["Authorization"] || null;
+    payload = JSON.parse(opts.body);
+    return {ok: true, json: async () => ({offer_id: 7})};
+  };
+  await A.doSubmitOffer();
+  check("Authorization header carries the buyer token", authHeader === "Bearer tok123", `got ${authHeader}`);
+  check("offer payload still carries buyer_phone", payload && payload.buyer_phone === "9841000001");
+  check("offer dialog closes after a successful submit", evalInApp("S.offerDialog") === null);
+  sandbox.document.getElementById = realGet;
+  A.BACKEND.enabled = false;
+}
+
 console.log(`\n${passed} passed, ${failures} failed.`);
 process.exit(failures > 0 ? 1 : 0);
+})();

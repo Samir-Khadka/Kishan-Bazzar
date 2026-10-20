@@ -737,7 +737,9 @@ async function handlePostBtn(){
   const cropKey = sell.crop, kg = sell.kg, grade = sell.grade;
   const mul = {A:1, B:.86, C:.7}[grade];
   const localRate = Math.round(CROPS[cropKey].rate * mul);
-  const today = L==="ne" ? "आज" : "Today";
+  // Canonical day marker ("today"/"last_week") — offerRow() localizes it,
+  // so toggling EN↔NE keeps working. Storing a localized string here
+  // used to leak e.g. "आज" into the English UI (fixed 2026-10-20).
 
   if(BACKEND.enabled && account.token){
     sell.posting = true; render({skipScroll:true});
@@ -751,13 +753,13 @@ async function handlePostBtn(){
       // show that on the offer instead of discarding it.
       const lotId = resp.lot_formed ? resp.lot_formed.lot_id : null;
       S.offers.unshift({id:Date.now(), crop:cropKey, kg, grade, status: lotId ? "lot" : "new",
-                         lot:lotId, rate:localRate, day:today, synced:true, remoteId:resp.listing_id});
+                         lot:lotId, rate:localRate, day:"today", synced:true, remoteId:resp.listing_id});
       sell = {crop:null, kg:20, grade:"A", posting:false}; S.tab = "today"; render();
       toast(lotId ? T("लट बन्यो: "+lotId,"Lot formed: "+lotId)
                   : T("वास्तविक सर्भरमा पुग्यो","Reached the real server"));
     }catch(err){
       S.offers.unshift({id:Date.now(), crop:cropKey, kg, grade, status:"new", lot:null,
-                         rate:localRate, day:today, synced:false});
+                         rate:localRate, day:"today", synced:false});
       sell = {crop:null, kg:20, grade:"A", posting:false}; S.tab = "today"; render();
       toast(T("सर्भरमा पुगेन — स्थानीय मात्र राखियो","Could not reach the server — saved locally only"));
     }
@@ -768,7 +770,7 @@ async function handlePostBtn(){
   // disabled or the farmer hasn't logged in, which is every visitor of
   // the published artifact by default
   S.offers.unshift({id:Date.now(), crop:cropKey, kg, grade, status:"new", lot:null,
-                     rate:localRate, day:today});
+                     rate:localRate, day:"today"});
   sell = {crop:null, kg:20, grade:"A"}; S.tab = "today"; render();
   toast(T("सहकारीमा पठाइयो","Sent to your co-op"));
 }
@@ -1098,6 +1100,34 @@ function viewToday(){
   </div>`;
 }
 
+/* ---------- background-refresh guard (fixed 2026-10-20) ----------
+   View functions that need live data must NEVER do
+   fetchX().then(()=>render()) directly: the fetch helpers resolve from
+   their TTL cache almost immediately, so that pattern re-rendered on
+   EVERY render — an infinite render→fetch→render microtask loop that
+   starved everything else (this actually hung the JS integration test).
+   isStale() decides whether a refresh is due; refreshOnce() runs the
+   fetch at most once while one is already in flight, and re-renders
+   exactly once when it completes. */
+const _refreshInFlight = {};
+function isStale(cache, ttlMs){ return !cache.data || (Date.now() - cache.at > ttlMs); }
+function refreshOnce(key, getCache, fetcher){
+  if(_refreshInFlight[key]) return;
+  _refreshInFlight[key] = true;
+  const before = getCache();
+  Promise.resolve().then(fetcher).then(
+    (data)=>{
+      _refreshInFlight[key] = false;
+      // Re-render ONLY when the fetch produced genuinely new data. A
+      // failed fetch returns the same stale (or null) payload — rendering
+      // then would immediately start another doomed fetch, which is
+      // exactly the render→fetch→render loop this guard exists to prevent.
+      if(data && data !== before) render({skipScroll:true});
+    },
+    ()=>{ _refreshInFlight[key] = false; }
+  );
+}
+
 /* ---------------- price trends ---------------- */
 let trendsCache = {data:null, at:0};
 async function fetchTrends(){
@@ -1137,7 +1167,10 @@ function sparkline(points, w=260, h=60){
 
 function renderPriceTrends(){
   if(!BACKEND.enabled) return "";
-  fetchTrends().then(()=>render({skipScroll:true}));
+  // Trigger at most one background refresh when the cache is stale — the
+  // guard prevents the infinite render loop the old unconditional
+  // fetchTrends().then(render) pattern caused (see helper above).
+  if(isStale(trendsCache, 120000)) refreshOnce("trends", ()=>trendsCache.data, fetchTrends);
   const data = trendsCache.data;
   if(!data || !Object.keys(data).length) return "";
   const crops = Object.keys(data).slice(0,4);
@@ -1996,7 +2029,7 @@ function viewRental(){
     {id:"d2", machine_name:"Mini Tiller 7HP", machine_type:"mini_tiller", rate_per_day:800, location:"Banepa", owner_name:"Mina Shrestha", contact_phone:"9841000003"},
   ];
   const list = BACKEND.enabled ? (rentalsCache.data || []) : demoRentals;
-  if(BACKEND.enabled) fetchRentals().then(()=>render({skipScroll:true}));
+  if(BACKEND.enabled && isStale(rentalsCache, 60000)) refreshOnce("rentals", ()=>rentalsCache.data, fetchRentals);
   return `<div class="stack">
     <div class="card" style="border-left:7px solid var(--paddy)">
       <div class="warn-line" style="font-size:20px">🚜 ${esc(T("मेसिन भाडामा","Rent machinery"))}</div>
@@ -2231,10 +2264,15 @@ async function doSubmitOffer(){
     toast(T("भाउ र मात्रा सही लेख्नुहोस्","Enter a valid rate and quantity"));
     return;
   }
+  // Send the buyer's token when logged in — the backend currently keys
+  // offers off buyer_phone in the body, but is moving to JWT auth
+  // (same as orders); sending the header now keeps this working on both.
+  const headers = {"Content-Type": "application/json"};
+  if(account.token) headers["Authorization"] = "Bearer " + account.token;
   try{
     const res = await fetch(`${BACKEND.baseUrl}/v1/offers`, {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
+      headers,
       body: JSON.stringify({
         buyer_name: account.name || "Buyer",
         buyer_phone: account.phone,
@@ -2280,6 +2318,7 @@ async function doPlaceOrder(){
 
   // Place one order per lot via the real API.
   let ok = 0, failed = 0;
+  const succeeded = [];
   for(const [lotId, qty] of rows){
     try{
       const res = await fetch(`${BACKEND.baseUrl}/v1/orders`, {
@@ -2295,13 +2334,20 @@ async function doPlaceOrder(){
           quantity_kg: qty
         })
       });
-      if(res.ok) ok++; else failed++;
+      if(res.ok){ ok++; succeeded.push(lotId); } else failed++;
     }catch(e){ failed++; }
   }
   _ordering = false;  // release the guard
   if(ok){
-    S.cart = {}; S.tab = "market";
+    // Only the lots that actually went through leave the cart — failed
+    // lines stay so the buyer can retry without re-picking everything
+    // (fixed 2026-10-20: the old code cleared the whole cart on any
+    // partial success, silently losing the failed items).
+    for(const id of succeeded) delete S.cart[id];
+    S.tab = "market";
     toast(T(`${ok} अर्डर पक्का भयो`, `${ok} order${ok>1?"s":""} confirmed`));
+    if(failed) toast(T(`${failed} लाइन बाँकी रह्यो — फेरि प्रयास गर्नुहोस्`,
+                        `${failed} line${failed>1?"s":""} still pending — try again`));
   }else{
     toast(T("अर्डर हुन सकेन — फेरि प्रयास गर्नुहोस्", "Order failed — try again"));
   }
@@ -2353,7 +2399,7 @@ function viewMyOffers(){
       <b>${esc(T("अफरहरू हेर्न लगइन गर्नुहोस्","Log in to see your offers"))}</b>
       ${esc(T("क्रेताको रूपमा लगइन गरेपछि तपाईंका मोलतोल यहाँ देखिन्छन्।","Your negotiations appear here once logged in as a buyer."))}</div></div>`;
   }
-  fetchMyOffers().then(()=>render({skipScroll:true}));
+  if(isStale(myOffersCache, 30000)) refreshOnce("myOffers", ()=>myOffersCache.data, fetchMyOffers);
   const offers = myOffersCache.data || [];
   if(!offers.length){
     return `<div class="stack"><div class="empty card"><span class="ic">💬</span>
@@ -2629,7 +2675,7 @@ async function fetchAdminOffers(){
 function viewAdminOffers(){
   const guard = viewAdminGuard();
   if(guard) return guard;
-  fetchAdminOffers().then(()=>render({skipScroll:true}));
+  if(isStale(adminOffersCache, 15000)) refreshOnce("adminOffers", ()=>adminOffersCache.data, fetchAdminOffers);
   const offers = (adminOffersCache.data || []).filter(o=>["pending","countered"].includes(o.status));
   const done = (adminOffersCache.data || []).filter(o=>!["pending","countered"].includes(o.status));
   const row = o => `<div class="card" style="margin-bottom:10px">

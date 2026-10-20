@@ -67,6 +67,9 @@ const sandbox = {
   Image: function () { this.onload = null; this.onerror = null; },
   FileReader: function () { this.onload = null; this.onerror = null; this.readAsDataURL = () => {}; },
   speechSynthesis: undefined,
+  // Node's WebCrypto — the app's apiCreateListing/doPlaceOrder use
+  // crypto.randomUUID() for Idempotency-Key headers.
+  crypto: globalThis.crypto,
   // Node's built-in fetch, so the app's own API-client code (apiRequestCode,
   // apiCreateListing, ...) runs unmodified and makes REAL HTTP requests.
   fetch: globalThis.fetch
@@ -82,7 +85,9 @@ const EXPORT_LIST = [
   "sendChatMessage","CROP_ALIASES","INTENT_KEYWORDS","sahayakSeen",
   "CROP_API_CODE","BACKEND","account","apiRequestCode","apiVerifyCode","apiCreateListing",
   "apiSaveLandScan","apiGetLandScan",
-  "doRequestCode","doVerifyCode","handlePostBtn","renderAccountPanel"
+  "doRequestCode","doVerifyCode","handlePostBtn","renderAccountPanel",
+  "isStale","refreshOnce","renderPriceTrends","viewRental","viewMyOffers","viewAdminOffers",
+  "doPlaceOrder","doSubmitOffer","trendsCache","rentalsCache","myOffersCache","adminOffersCache"
 ];
 const combined = appJs + `\n;globalThis.__test = {${EXPORT_LIST.join(",")}};`;
 
