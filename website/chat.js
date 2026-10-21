@@ -27,6 +27,14 @@
   #kb-chat-input button{background:#2E7D32;color:#fff;border:none;border-radius:50%;width:40px;height:40px;
     font-size:18px;cursor:pointer;flex-shrink:0}
   #kb-chat-input button:hover{background:#1B5E20}
+  .kb-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .kb-chip{background:#E8F5E9;border:1px solid #A5D6A7;color:#1B5E20;border-radius:16px;
+    padding:6px 12px;font-size:12px;cursor:pointer}
+  .kb-chip:hover{background:#C8E6C9}
+  .kb-card{background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:10px 12px;
+    margin-top:8px;display:flex;gap:10px;align-items:center;font-size:13px}
+  .kb-card .ic{font-size:24px}
+  .kb-card b{display:block}
   @media(max-width:480px){#kb-chat-panel{right:12px;bottom:82px}}`;
 
   const style = document.createElement("style");
@@ -75,6 +83,36 @@
     addMsg(ne ? "नमस्ते! 🙏 म किसान बजार सहायक हुँ। भाउ, बाली, वा अर्डरबारे सोध्नुहोस्।"
               : "Hello! 🙏 I'm the Kisan Bazar assistant. Ask me about prices, crops, or orders.", "bot");
   }
+  function renderCard(card){
+    if(!card) return null;
+    const d = document.createElement("div");
+    d.className = "kb-card";
+    if(card.type === "price"){
+      const arrow = card.change > 0 ? "📈" : card.change < 0 ? "📉" : "➡️";
+      d.innerHTML = `<span class="ic">${card.icon || "🌾"}</span>
+        <div><b></b><span>रू ${card.rate}/kg ${arrow}</span></div>`;
+      d.querySelector("b").textContent = card.name || "";
+    }else if(card.type === "weather"){
+      d.innerHTML = `<span class="ic">🌤️</span><div><b></b><span></span></div>`;
+      d.querySelector("b").textContent = card.today || "";
+      d.querySelector("span:last-child").textContent = card.advice || "";
+    }else return null;
+    return d;
+  }
+  function renderChips(chips){
+    if(!chips || !chips.length) return;
+    const wrap = document.createElement("div");
+    wrap.className = "kb-chips";
+    chips.forEach(c=>{
+      const b = document.createElement("button");
+      b.className = "kb-chip";
+      b.textContent = c;
+      b.onclick = ()=>{ input.value = c; send(); };
+      wrap.appendChild(b);
+    });
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
   async function send(){
     const text = input.value.trim();
     if(!text) return;
@@ -88,7 +126,11 @@
       });
       const d = await r.json();
       typing.remove();
-      addMsg(d.reply || "…", "bot");
+      // Surface server errors (e.g. rate limit) instead of a bare "…"
+      addMsg(d.reply || d.error || "…", "bot");
+      (d.cards || []).forEach(c=>{ const el = renderCard(c); if(el) msgs.appendChild(el); });
+      renderChips(d.chips);
+      msgs.scrollTop = msgs.scrollHeight;
       if(d.session_id) sessionId = d.session_id;
     }catch(e){
       typing.remove();

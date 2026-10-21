@@ -625,6 +625,27 @@ def list_lots():
     })
 
 
+@app.get("/v1/lots/<lot_id>")
+def get_lot(lot_id):
+    """Single lot by id — the website's shareable lot pages link here.
+    The list endpoint is paginated, so a lookup against the first page
+    would wrongly 404 lots beyond it."""
+    conn = db.get_db()
+    row = conn.execute(
+        "SELECT l.*, c.name AS coop_name, "
+        "(SELECT COUNT(DISTINCT li.farmer_phone) FROM lot_listings ll "
+        " JOIN listings li ON ll.listing_id = li.id "
+        " WHERE ll.lot_id = l.id) AS farmer_count "
+        "FROM lots l LEFT JOIN cooperatives c ON l.coop_id = c.id "
+        "WHERE l.id=?",
+        (lot_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "lot not found"}), 404
+    return jsonify(dict(row))
+
+
 @app.post("/v1/lots/<lot_id>/confirm")
 @require_auth
 @require_staff

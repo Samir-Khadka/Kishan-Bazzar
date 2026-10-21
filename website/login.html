@@ -92,8 +92,17 @@ async function sendOTP(){
     document.getElementById("step-phone").style.display = "none";
     document.getElementById("step-otp").style.display = "block";
     msg.textContent = "";
-    // Demo mode: show code directly
-    if(d.demo_code) msg.textContent = (LANG==="ne" ? "डेमो कोड: " : "Demo code: ") + d.demo_code;
+    // Demo mode: the dev endpoint (404 when demo mode is off) exposes the
+    // code, like the app's own login does. request-code never returns it.
+    try{
+      const devRes = await fetch(API + "/v1/dev/latest-code/" + encodeURIComponent(phone));
+      if(devRes.ok){
+        const devData = await devRes.json();
+        if(devData && devData.code){
+          msg.textContent = (LANG==="ne" ? "डेमो कोड: " : "Demo code: ") + devData.code;
+        }
+      }
+    }catch(_e){}
     document.getElementById("login-otp").focus();
   }catch(e){
     msg.textContent = LANG==="ne" ? "त्रुटि: " + e.message : "Error: " + e.message;
@@ -110,11 +119,14 @@ async function verifyOTP(){
     });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || r.status);
-    localStorage.setItem("kb-token", d.token);
-    localStorage.setItem("kb-phone", pendingPhone);
+    // Session keys and JSON encoding must match the app's store helper
+    // (kisan-bazar.html: store.set/get use "kb:"+key with JSON.stringify),
+    // otherwise the app lands logged-out after this redirect.
+    localStorage.setItem("kb:accountToken", JSON.stringify(d.token));
+    localStorage.setItem("kb:accountPhone", JSON.stringify(pendingPhone));
     window.location.href = "/";
   }catch(e){
-    msg.textContent = LANG==="ne" ? "गलत कोड। पुनः प्रयास गर्नुहोस्।" : "Wrong code. Try again.";
+    msg.textContent = (LANG==="ne" ? "त्रुटि: " : "Error: ") + e.message;
   }
 }
 function backToPhone(){
@@ -122,6 +134,9 @@ function backToPhone(){
   document.getElementById("step-phone").style.display = "block";
   document.getElementById("login-msg").textContent = "";
 }
+// Enter submits on both steps
+document.getElementById("login-phone").addEventListener("keydown", e=>{ if(e.key==="Enter") sendOTP(); });
+document.getElementById("login-otp").addEventListener("keydown", e=>{ if(e.key==="Enter") verifyOTP(); });
 </script>
 </body>
 </html>

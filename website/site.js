@@ -20,13 +20,12 @@ function applyLang(){
   if(ml) loadMarketLots(ml);
   const lp = document.getElementById("lot-preview");
   if(lp) loadLotPreview();
+  // lot.html renders its detail card from an inline script — re-render it too
+  if(typeof renderLotDetail === "function") renderLotDetail();
 }
 document.addEventListener("DOMContentLoaded", ()=>{
   applyLang();
   loadStats();
-  loadLotPreview();
-  const ml = document.getElementById("market-lots");
-  if(ml) loadMarketLots(ml);
 });
 
 async function api(path){
@@ -80,8 +79,10 @@ async function loadLotPreview(){
   const box = document.getElementById("lot-preview");
   if(!box) return;
   try{
-    const lots = await api("/v1/lots");
-    const ready = (lots||[]).filter(l=>l.status==="ready").slice(0,6);
+    // /v1/market/lots is the buyer-facing list of ready lots (flat array,
+    // no pagination trap — unlike /v1/lots, which only returns page 1).
+    const lots = await api("/v1/market/lots");
+    const ready = (lots||[]).slice(0,6);
     box.innerHTML = ready.length ? ready.map(lotCard).join("")
       : `<p class="muted">${LANG==="ne"?"अहिले कुनै लट छैन।":"No lots right now."}</p>`;
   }catch(e){
@@ -91,7 +92,8 @@ async function loadLotPreview(){
 
 async function loadMarketLots(box){
   try{
-    const lots = await api("/v1/lots");
+    // Buyer-facing ready-lots list (flat array, no pagination trap).
+    const lots = await api("/v1/market/lots");
     const ready = (lots||[]).filter(l=>l.status==="ready");
     box.innerHTML = ready.length ? ready.map(lotCard).join("")
       : `<div class="empty">
