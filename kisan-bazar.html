@@ -2264,9 +2264,8 @@ async function doSubmitOffer(){
     toast(T("भाउ र मात्रा सही लेख्नुहोस्","Enter a valid rate and quantity"));
     return;
   }
-  // Send the buyer's token when logged in — the backend currently keys
-  // offers off buyer_phone in the body, but is moving to JWT auth
-  // (same as orders); sending the header now keeps this working on both.
+  // The backend requires the buyer's own JWT on /v1/offers — bids are
+  // bound to the token's phone, so nobody can bid as someone else's number.
   const headers = {"Content-Type": "application/json"};
   if(account.token) headers["Authorization"] = "Bearer " + account.token;
   try{
@@ -2385,7 +2384,11 @@ async function fetchMyOffers(){
   const now = Date.now();
   if(myOffersCache.data && now - myOffersCache.at < 30000) return myOffersCache.data;
   try{
-    const res = await fetch(`${BACKEND.baseUrl}/v1/offers?buyer_phone=${encodeURIComponent(account.phone)}`);
+    // Backend requires the buyer's own token now — buyers only see their
+    // own offers (staff see all).
+    const headers = {};
+    if(account.token) headers["Authorization"] = "Bearer " + account.token;
+    const res = await fetch(`${BACKEND.baseUrl}/v1/offers?buyer_phone=${encodeURIComponent(account.phone)}`, {headers});
     if(!res.ok) throw new Error(res.status);
     myOffersCache = {data: await res.json(), at: now};
     return myOffersCache.data;
@@ -2665,7 +2668,9 @@ async function fetchAdminOffers(){
   const now = Date.now();
   if(adminOffersCache.data && now - adminOffersCache.at < 15000) return adminOffersCache.data;
   try{
-    const res = await fetch(`${BACKEND.baseUrl}/v1/offers`);
+    // Staff token required — the backend only shows all offers to staff.
+    const res = await fetch(`${BACKEND.baseUrl}/v1/offers`, {
+      headers: {"Authorization": "Bearer " + account.token}});
     if(!res.ok) throw new Error(res.status);
     adminOffersCache = {data: await res.json(), at: now};
     return adminOffersCache.data;

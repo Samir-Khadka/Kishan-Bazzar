@@ -309,6 +309,18 @@ def valid_positive_kg(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 < value <= MAX_REASONABLE_KG
 
 
+def _reject(conn, error, status):
+    """Roll back any in-flight transaction, close the connection, and return
+    a JSON error response tuple. Used by endpoints that open a write
+    transaction (BEGIN IMMEDIATE) before validating — every failure path
+    must release the lock, or the next writer blocks for the busy timeout."""
+    try:
+        conn.rollback()
+    finally:
+        conn.close()
+    return jsonify({"error": error}), status
+
+
 @app.get("/v1/health")
 def health():
     """Liveness probe for the hosting platform. No auth, no PII."""
@@ -396,6 +408,11 @@ def admin_login():
     for an SMS. Credentials come from env vars (never hardcoded); in demo
     mode a default is used. Returns a staff JWT that unlocks the admin panel."""
     import hashlib, hmac
+    # Brute-force protection: admin credentials are a high-value target and
+    # this endpoint is public. 10 attempts per 10 minutes per IP — a wrong
+    # guess past the limit gets 429 instead of another try.
+    if not auth.check_rate_limit(f"admin-login:{request.remote_addr}", max_attempts=10, window_seconds=600):
+        return jsonify({"error": "too many attempts, try again later"}), 429
     body = request.get_json(force=True, silent=True) or {}
     username = (body.get("username") or "").strip()
     password = body.get("password") or ""
@@ -783,34 +800,38 @@ def place_order():
         return jsonify({"error": "buyer_phone must be a valid Nepali mobile number"}), 400
 
     conn = db.get_db()
-    lot = conn.execute("SELECT * FROM lots WHERE id=?", (body["lot_id"],)).fetchone()
-    if not lot:
-        conn.close()
-        return jsonify({"error": "lot not found"}), 404
-    if lot["status"] != "ready":
-        conn.close()
-        return jsonify({"error": f"lot is '{lot['status']}', not orderable"}), 409
-    if body["quantity_kg"] > lot["pooled_kg"]:
-        conn.close()
-        return jsonify({"error": "quantity exceeds available lot size"}), 400
-    # Oversell guard: earlier orders against this lot reduce what's left.
-    # Without this, N orders each <= pooled_kg could all succeed and sell
-    # the same kilos several times over.
-    already_ordered = conn.execute(
-        "SELECT COALESCE(SUM(quantity_kg), 0) AS total FROM orders WHERE lot_id=?",
-        (body["lot_id"],)
-    ).fetchone()["total"]
-    if already_ordered + body["quantity_kg"] > lot["pooled_kg"]:
-        conn.close()
-        return jsonify({"error": f"only {lot['pooled_kg'] - already_ordered} kg still available on this lot"}), 400
+    # Oversell guard, made atomic: BEGIN IMMEDIATE takes the database write
+    # lock *before* the availability read, so the check-and-insert below
+    # serializes against concurrent orders. Without this, two orders
+    # arriving at the same instant could both pass the check and sell the
+    # same kilos twice over.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        lot = conn.execute("SELECT * FROM lots WHERE id=?", (body["lot_id"],)).fetchone()
+        if not lot:
+            return _reject(conn, "lot not found", 404)
+        if lot["status"] != "ready":
+            return _reject(conn, f"lot is '{lot['status']}', not orderable", 409)
+        if body["quantity_kg"] > lot["pooled_kg"]:
+            return _reject(conn, "quantity exceeds available lot size", 400)
+        # Oversell guard: earlier orders against this lot reduce what's left.
+        # Without this, N orders each <= pooled_kg could all succeed and sell
+        # the same kilos several times over.
+        already_ordered = conn.execute(
+            "SELECT COALESCE(SUM(quantity_kg), 0) AS total FROM orders WHERE lot_id=?",
+            (body["lot_id"],)
+        ).fetchone()["total"]
+        if already_ordered + body["quantity_kg"] > lot["pooled_kg"]:
+            return _reject(conn, f"only {lot['pooled_kg'] - already_ordered} kg still available on this lot", 400)
 
-    cur = conn.execute(
-        "INSERT INTO orders (buyer_name, buyer_phone, lot_id, quantity_kg, unit_rate) VALUES (?,?,?,?,?)",
-        (body["buyer_name"], phone, body["lot_id"], body["quantity_kg"], lot["rate_per_kg"]),
-    )
-    conn.commit()
-    order_id = cur.lastrowid
-    conn.close()
+        cur = conn.execute(
+            "INSERT INTO orders (buyer_name, buyer_phone, lot_id, quantity_kg, unit_rate) VALUES (?,?,?,?,?)",
+            (body["buyer_name"], phone, body["lot_id"], body["quantity_kg"], lot["rate_per_kg"]),
+        )
+        order_id = cur.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
     return jsonify({
         "order_id": order_id,
         "total": body["quantity_kg"] * lot["rate_per_kg"],
@@ -820,10 +841,14 @@ def place_order():
 # ---------------- bid/offer negotiation ----------------
 
 @app.post("/v1/offers")
+@require_auth
+@require_self("buyer_phone")
 def make_offer():
     """Buyer places a bid/offer on a lot. Unlike fixed-price orders, offers
     propose a rate — the co-op can accept, reject, or counter.
-    Requires buyer identity (phone). Rate-limited per IP."""
+    Requires the buyer's own verified login: the bid is bound to the token's
+    phone, so nobody can place bids as someone else's number. Rate-limited
+    per IP."""
     if not auth.check_rate_limit(f"offer:{request.remote_addr}", max_attempts=10, window_seconds=600):
         return jsonify({"error": "too many offers, try again later"}), 429
     body = request.get_json(force=True, silent=True) or {}
@@ -862,11 +887,22 @@ def make_offer():
 
 
 @app.get("/v1/offers")
+@require_auth
 def list_offers():
-    """List offers, optionally filtered by lot_id or buyer_phone."""
+    """List offers, optionally filtered by lot_id or buyer_phone.
+    Staff see everything; everyone else sees only their own offers —
+    buyer names and phone numbers are not public data."""
+    conn = db.get_db()
+    me = conn.execute("SELECT is_staff FROM farmers WHERE phone=?",
+                      (g.phone,)).fetchone()
+    is_staff = bool(me and me["is_staff"])
     lot_id = request.args.get("lot_id")
     buyer_phone = request.args.get("buyer_phone")
-    conn = db.get_db()
+    if not is_staff:
+        if buyer_phone and buyer_phone != g.phone:
+            conn.close()
+            return jsonify({"error": "you can only view your own offers"}), 403
+        buyer_phone = g.phone
     q = "SELECT * FROM offers WHERE 1=1"
     params = []
     if lot_id:
@@ -886,54 +922,62 @@ def decide_offer(offer_id):
     Body: {"decision": "accepted"|"rejected"|"countered", "counter_rate_per_kg": N}
     Accepted offers convert to real orders."""
     conn = db.get_db()
-    me = conn.execute("SELECT is_staff FROM farmers WHERE phone=?",
-                      (g.phone,)).fetchone()
-    if not me or not me["is_staff"]:
-        conn.close()
-        return jsonify({"error": "staff only"}), 403
-    body = request.get_json(force=True, silent=True) or {}
-    decision = (body.get("decision") or "").strip().lower()
-    if decision not in ("accepted", "rejected", "countered"):
-        return jsonify({"error": "decision must be accepted, rejected, or countered"}), 400
+    try:
+        me = conn.execute("SELECT is_staff FROM farmers WHERE phone=?",
+                          (g.phone,)).fetchone()
+        if not me or not me["is_staff"]:
+            return _reject(conn, "staff only", 403)
+        body = request.get_json(force=True, silent=True) or {}
+        decision = (body.get("decision") or "").strip().lower()
+        if decision not in ("accepted", "rejected", "countered"):
+            return _reject(conn, "decision must be accepted, rejected, or countered", 400)
 
-    conn = db.get_db()
-    offer = conn.execute("SELECT * FROM offers WHERE id=?", (offer_id,)).fetchone()
-    if not offer:
-        conn.close()
-        return jsonify({"error": "offer not found"}), 404
-    if offer["status"] != "pending" and not (offer["status"] == "countered" and decision in ("accepted", "rejected")):
-        conn.close()
-        return jsonify({"error": f"offer is '{offer['status']}', cannot decide"}), 409
+        offer = conn.execute("SELECT * FROM offers WHERE id=?", (offer_id,)).fetchone()
+        if not offer:
+            return _reject(conn, "offer not found", 404)
+        if offer["status"] != "pending" and not (offer["status"] == "countered" and decision in ("accepted", "rejected")):
+            return _reject(conn, f"offer is '{offer['status']}', cannot decide", 409)
 
-    if decision == "countered":
-        try:
-            counter = float(body.get("counter_rate_per_kg"))
-        except (TypeError, ValueError):
-            conn.close()
-            return jsonify({"error": "counter_rate_per_kg required for counter"}), 400
-        if counter <= 0:
-            conn.close()
-            return jsonify({"error": "counter rate must be positive"}), 400
-        conn.execute(
-            "UPDATE offers SET status='countered', counter_rate_per_kg=?, decided_at=datetime('now') WHERE id=?",
-            (counter, offer_id))
-    elif decision == "accepted":
-        # Convert to a real order at the agreed rate.
-        rate = offer["counter_rate_per_kg"] if offer["status"] == "countered" and offer["counter_rate_per_kg"] else offer["bid_rate_per_kg"]
-        conn.execute(
-            "INSERT INTO orders (buyer_name, buyer_phone, lot_id, quantity_kg, unit_rate, status) "
-            "VALUES (?,?,?,?,?,'placed')",
-            (offer["buyer_name"], offer["buyer_phone"], offer["lot_id"],
-             offer["quantity_kg"], rate))
-        conn.execute(
-            "UPDATE offers SET status='converted', decided_at=datetime('now') WHERE id=?",
-            (offer_id,))
-    else:
-        conn.execute(
-            "UPDATE offers SET status='rejected', decided_at=datetime('now') WHERE id=?",
-            (offer_id,))
-    conn.commit()
-    conn.close()
+        if decision == "countered":
+            try:
+                counter = float(body.get("counter_rate_per_kg"))
+            except (TypeError, ValueError):
+                return _reject(conn, "counter_rate_per_kg required for counter", 400)
+            if counter <= 0:
+                return _reject(conn, "counter rate must be positive", 400)
+            conn.execute(
+                "UPDATE offers SET status='countered', counter_rate_per_kg=?, decided_at=datetime('now') WHERE id=?",
+                (counter, offer_id))
+        elif decision == "accepted":
+            # Convert to a real order at the agreed rate. Takes the same
+            # atomic availability check as direct orders — accepting an
+            # offer must never oversell the lot either.
+            conn.execute("BEGIN IMMEDIATE")
+            lot = conn.execute("SELECT * FROM lots WHERE id=?",
+                               (offer["lot_id"],)).fetchone()
+            if not lot:
+                return _reject(conn, "lot not found", 404)
+            already = conn.execute(
+                "SELECT COALESCE(SUM(quantity_kg), 0) AS total FROM orders WHERE lot_id=?",
+                (offer["lot_id"],)).fetchone()["total"]
+            if already + offer["quantity_kg"] > (lot["pooled_kg"] or 0):
+                return _reject(conn, f"only {lot['pooled_kg'] - already} kg still available on this lot", 409)
+            rate = offer["counter_rate_per_kg"] if offer["status"] == "countered" and offer["counter_rate_per_kg"] else offer["bid_rate_per_kg"]
+            conn.execute(
+                "INSERT INTO orders (buyer_name, buyer_phone, lot_id, quantity_kg, unit_rate, status) "
+                "VALUES (?,?,?,?,?,'placed')",
+                (offer["buyer_name"], offer["buyer_phone"], offer["lot_id"],
+                 offer["quantity_kg"], rate))
+            conn.execute(
+                "UPDATE offers SET status='converted', decided_at=datetime('now') WHERE id=?",
+                (offer_id,))
+        else:
+            conn.execute(
+                "UPDATE offers SET status='rejected', decided_at=datetime('now') WHERE id=?",
+                (offer_id,))
+        conn.commit()
+    finally:
+        conn.close()
     return jsonify({"offer_id": offer_id, "decision": decision})
 
 
