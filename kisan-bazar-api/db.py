@@ -10,6 +10,7 @@ change any of the business logic in aggregation.py — only db.py's SQL
 and the distance calculation change.
 """
 import sqlite3
+import time
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "kisan_bazar.db"
@@ -227,10 +228,21 @@ def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
     # WAL mode: readers don't block writers — critical for multi-worker deploys.
     # Without this, concurrent gunicorn workers serialize on every write.
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA busy_timeout = 30000")
+    # The journal-mode transition itself needs a brief exclusive lock and
+    # does NOT honour busy_timeout, so two processes booting at the same
+    # instant (exactly the multi-worker case) can collide on it and die
+    # with "database is locked" — retry briefly instead of failing boot.
+    for attempt in range(20):
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            break
+        except sqlite3.OperationalError:
+            if attempt == 19:
+                raise
+            time.sleep(0.25)
     conn.execute("PRAGMA synchronous = NORMAL")
     return conn
 
