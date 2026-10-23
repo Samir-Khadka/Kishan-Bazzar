@@ -45,7 +45,7 @@ a:hover{text-decoration:underline}
 .lede{font-size:19px; opacity:.92; margin-bottom:26px; max-width:520px}
 .hero-ctas{display:flex; gap:12px; flex-wrap:wrap; margin-bottom:32px}
 .hero-stats{display:flex; gap:36px}
-.hero-stats b{display:block; font-size:28px; color:var(--tori)}
+.hero-stats b{display:block; font-size:28px; color:#fff}
 .hero-stats span{font-size:14px; opacity:.85}
 .hero-art{font-size:120px; opacity:.9}
 
@@ -90,6 +90,7 @@ a:hover{text-decoration:underline}
 .steps{display:grid; gap:14px; margin:24px 0}
 .step{background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
   padding:20px 22px; display:flex; gap:16px}
+.step h2.step-h{font-size:19px; color:var(--paddy-deep)}
 .step .n{background:var(--paddy); color:#fff; width:36px; height:36px; border-radius:50%;
   display:flex; align-items:center; justify-content:center; font-weight:800; flex:0 0 auto}
 .contact-card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius);

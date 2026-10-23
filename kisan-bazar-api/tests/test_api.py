@@ -59,7 +59,7 @@ def run():
     }, as_phone="9841000002")
     body = r.get_json()
     assert "lot_formed" not in body, "90kg total should still be short of 130kg"
-    print(f"  no lot yet, as expected (90kg pooled so far)")
+    print("  no lot yet, as expected (90kg pooled so far)")
 
     print("\n=== 3. Far-away farmer (Bishnu, ~50km out) lists 100kg ===")
     r = post(client, "/v1/listings", {

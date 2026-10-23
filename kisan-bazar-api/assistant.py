@@ -518,17 +518,19 @@ def _ledger(_t, lang, _c, _ctx, db_conn, farmer, _conf):
               "Hisab herna login garnuhos — mero tab ma phone number bata code linuhos.",
               "Log in to see your ledger — get a code with your phone number in the Mine tab.", lang),
             chips=[T("लगइन गर्ने", "Login garne", "Log in", lang)])
-    # The figure comes from repositories.farmer_pending_due — the
-    # prorated listings -> lot_listings -> lots -> orders join. (The
-    # previous inline query named columns that don't exist and hid
-    # the resulting error behind a bare `except: pass`, so every
-    # farmer was told "no pending payments" forever.) A lookup
-    # failure now degrades HONESTLY: the farmer is told the ledger
-    # couldn't be fetched, never that nothing is owed.
+    # The figures come from repositories.farmer_dues — the prorated
+    # listings -> lot_listings -> lots -> orders join, split by the
+    # order_settlements state: 'pending' is ordered-but-unpaid value,
+    # 'settled' is what staff have recorded as paid. (The previous
+    # inline query named columns that don't exist and hid the
+    # resulting error behind a bare `except: pass`, so every farmer
+    # was told "no pending payments" forever.) A lookup failure now
+    # degrades HONESTLY: the farmer is told the ledger couldn't be
+    # fetched, never that nothing is owed.
     try:
         if db_conn is None:
             raise RuntimeError("no db connection")
-        due = repositories.farmer_pending_due(db_conn, farmer["phone"])
+        dues = repositories.farmer_dues(db_conn, farmer["phone"])
     except Exception as e:
         print(f"assistant ledger lookup failed: {e!r}", file=sys.stderr)
         return _resp(
@@ -536,11 +538,24 @@ def _ledger(_t, lang, _c, _ctx, db_conn, farmer, _conf):
               "⚠️ Ahile tapaaiko hisab lyauna sakiena. Kehi berpachhi feri prayas garnuhos, wa sahakarilai phone garnuhos.",
               "⚠️ I couldn't fetch your ledger right now. Please try again in a little while, or call your co-op.", lang),
             chips=[T("फेरि प्रयास गर्ने", "Feri prayas garne", "Try again", lang)])
+    due, settled = dues["pending"], dues["settled"]
+    if due > 0 and settled > 0:
+        return _resp(
+            T(f"💰 तपाईंलाई रू {due:,.0f} आउन बाँकी छ। ✅ रू {settled:,.0f} भुक्तानी भइसकेको छ।",
+              f"💰 Tapailai Rs {due:,.0f} auna baaki chha. ✅ Rs {settled:,.0f} bhuktani bhaisakeko chha.",
+              f"💰 You have Rs {due:,.0f} pending. ✅ Rs {settled:,.0f} has already been settled.", lang),
+            chips=[T("धन्यवाद", "Dhanyabad", "Thanks", lang)])
     if due > 0:
         return _resp(
             T(f"💰 तपाईंलाई रू {due:,.0f} आउन बाँकी छ। तौलिएको ४८ घण्टाभित्र भुक्तानी हुन्छ।",
               f"💰 Tapailai Rs {due:,.0f} auna baaki chha. Taulieko 48 ghanta bhitra bhuktani hunchha.",
               f"💰 You have Rs {due:,.0f} pending. Paid within 48 hours of weighing.", lang),
+            chips=[T("धन्यवाद", "Dhanyabad", "Thanks", lang)])
+    if settled > 0:
+        return _resp(
+            T(f"✅ तपाईंको सबै हिसाब चुक्ता छ — रू {settled:,.0f} भुक्तानी भइसकेको छ, केही बाँकी छैन।",
+              f"✅ Tapaaiko sabai hisab chukta chha — Rs {settled:,.0f} bhuktani bhaisakeko chha, kehi baaki chhaina.",
+              f"✅ You're all settled up — Rs {settled:,.0f} has been paid, nothing is pending.", lang),
             chips=[T("धन्यवाद", "Dhanyabad", "Thanks", lang)])
     return _resp(
         T("✅ अहिले तपाईंको कुनै भुक्तानी बाँकी छैन।",
@@ -634,7 +649,6 @@ def _help(_t, lang, _c, _ctx, _db, _farmer, _conf):
 
 
 def _fallback(_t, lang, _c, _ctx, _db, _farmer, conf):
-    low = conf < 0.4
     return _resp(
         T("मैले ठ्याक्कै बुझिनँ। भाउ, मौसम, बेच्ने, के लगाउने वा हिसाबबारे सोध्नुहोस् — वा सहकारीलाई सिधै फोन गर्नुहोस्।",
           "Maile thyakkai bujhina. Bhau, mausam, bechne, ke lagaune wa hisab baare sodhnuhos — wa sahakarilai sidhai phone garnuhos.",

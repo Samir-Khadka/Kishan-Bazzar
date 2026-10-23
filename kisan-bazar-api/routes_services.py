@@ -1,22 +1,13 @@
 """Service routes: machinery rentals (browse, list, book, and the
 owner-confirm / cancel lifecycle) and the trilingual assistant
 chat endpoint."""
-import os
-import re
+from flask import Blueprint, g, jsonify, request
 
-from flask import Blueprint, request, jsonify, g, current_app
-
-import db
-import aggregation
-import auth
 import assistant
+import auth
+import db
 import repositories
-import availability
-from web import (
-    DEMO_MODE, DEFAULT_TARGET_KG, MAX_REASONABLE_KG,
-    require_auth, require_self, require_staff, idempotent,
-    valid_positive_kg, reject,
-)
+from web import reject, require_auth
 
 bp = Blueprint("services", __name__)
 
@@ -30,14 +21,7 @@ def list_rentals():
     mtype = request.args.get("type", "").strip()
     loc = request.args.get("location", "").strip()
     conn = db.get_db()
-    q = "SELECT * FROM rentals WHERE available=1"
-    params = []
-    if mtype:
-        q += " AND machine_type=?"; params.append(mtype)
-    if loc:
-        q += " AND location LIKE ?"; params.append(f"%{loc}%")
-    q += " ORDER BY created_at DESC"
-    rows = conn.execute(q, params).fetchall()
+    rows = repositories.list_rentals(conn, mtype, loc)
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -60,7 +44,7 @@ def create_rental():
     if not name or not location or not contact or rate <= 0:
         return jsonify({"error": "machine_name, location, contact_phone and positive rate_per_day required"}), 400
     conn = db.get_db()
-    me = conn.execute("SELECT name FROM farmers WHERE phone=?", (g.phone,)).fetchone()
+    me = repositories.get_farmer(conn, g.phone)
     cur = conn.execute(
         "INSERT INTO rentals (owner_phone, owner_name, machine_type, machine_name, rate_per_day, location, contact_phone) "
         "VALUES (?,?,?,?,?,?,?)",
@@ -101,9 +85,8 @@ def book_rental(rental_id):
         # orders: two simultaneous bookings for the same dates must
         # not both slip past the overlap check.
         conn.execute("BEGIN IMMEDIATE")
-        rental = conn.execute("SELECT * FROM rentals WHERE id=? AND available=1",
-                              (rental_id,)).fetchone()
-        if not rental:
+        rental = repositories.get_rental(conn, rental_id)
+        if not rental or not rental["available"]:
             return reject(conn, "rental not found or unavailable", 404)
         clash = repositories.overlapping_booking(conn, rental_id, book_date, days)
         if clash:
@@ -111,7 +94,7 @@ def book_rental(rental_id):
                 conn,
                 f"machine already booked from {clash['book_date']} "
                 f"for {clash['days']} day(s)", 409)
-        me = conn.execute("SELECT name FROM farmers WHERE phone=?", (g.phone,)).fetchone()
+        me = repositories.get_farmer(conn, g.phone)
         cur = conn.execute(
             "INSERT INTO rental_bookings (rental_id, farmer_phone, farmer_name, days, book_date) "
             "VALUES (?,?,?,?,?)",
@@ -203,11 +186,11 @@ def assistant_chat():
         phone = auth.verify_token(authz[7:])
         if phone:
             conn = db.get_db()
-            row = conn.execute(
-                "SELECT phone, name, is_staff FROM farmers WHERE phone=?", (phone,)).fetchone()
+            row = repositories.get_farmer(conn, phone)
             conn.close()
             if row:
-                farmer = dict(row)
+                farmer = {"phone": row["phone"], "name": row["name"],
+                          "is_staff": row["is_staff"]}
 
     conn = db.get_db()
     try:

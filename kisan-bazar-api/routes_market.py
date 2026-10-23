@@ -2,22 +2,18 @@
 bid/offer negotiation, price trends and public stats. The stock
 invariant for orders and offer acceptance lives in availability.py;
 row reads for offers/lots go through repositories.py."""
-import os
 import re
 
-from flask import Blueprint, request, jsonify, g, current_app
+from flask import Blueprint, g, jsonify, request
 
-import db
 import aggregation
 import auth
-import assistant
-import repositories
 import availability
-from web import (
-    DEMO_MODE, DEFAULT_TARGET_KG, MAX_REASONABLE_KG,
-    require_auth, require_self, require_staff, idempotent,
-    valid_positive_kg, reject,
-)
+import db
+import repositories
+from web import (DEFAULT_TARGET_KG, MAX_REASONABLE_KG, idempotent, reject,
+                 require_auth, require_self, require_staff,
+                 valid_positive_kg)
 
 bp = Blueprint("market", __name__)
 
@@ -50,7 +46,7 @@ def create_listing():
 
     # Validate crop_code against the crops table — an invalid code would
     # otherwise die as an unhandled 500 on the FK constraint.
-    crop = conn.execute("SELECT code FROM crops WHERE code=?", (body["crop_code"],)).fetchone()
+    crop = repositories.get_crop(conn, body["crop_code"])
     if not crop:
         conn.close()
         return jsonify({"error": "unknown crop_code"}), 400
@@ -84,9 +80,7 @@ def my_listings():
     # param — otherwise anyone could read anyone's listing history by
     # changing ?phone= in the URL despite having a valid token of their own
     conn = db.get_db()
-    rows = conn.execute(
-        "SELECT * FROM listings WHERE farmer_phone=? ORDER BY created_at DESC", (g.phone,)
-    ).fetchall()
+    rows = repositories.listings_for_farmer(conn, g.phone)
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -103,32 +97,11 @@ def list_lots():
     except ValueError:
         return jsonify({"error": "invalid pagination params"}), 400
     conn = db.get_db()
-    # Join cooperatives for display name + count distinct contributing farmers
-    # via lot_listings -> listings, so the frontend doesn't render placeholders.
-    where = "WHERE 1=1"
-    params = []
-    if coop_id:
-        where += " AND l.coop_id=?"
-        params.append(coop_id)
-    if status:
-        where += " AND l.status=?"
-        params.append(status)
-    total = conn.execute(
-        f"SELECT COUNT(*) as c FROM lots l {where}", params).fetchone()["c"]
-    # farmer_count via one GROUP BY join, not a correlated subquery per row:
-    # the old version ran one extra query for every lot on the page (up to
-    # 200). Grouping by the lots PK keeps l.* deterministic in SQLite.
-    rows = conn.execute(
-        "SELECT l.*, c.name AS coop_name, "
-        "COUNT(DISTINCT li.farmer_phone) AS farmer_count "
-        "FROM lots l "
-        "LEFT JOIN cooperatives c ON l.coop_id = c.id "
-        "LEFT JOIN lot_listings ll ON ll.lot_id = l.id "
-        "LEFT JOIN listings li ON ll.listing_id = li.id "
-        f"{where} GROUP BY l.id "
-        "ORDER BY l.created_at DESC LIMIT ? OFFSET ?",
-        params + [limit, offset],
-    ).fetchall()
+    # Join cooperatives for display name + count distinct contributing
+    # farmers via lot_listings -> listings, so the frontend doesn't
+    # render placeholders. The query itself is a read model now:
+    # repositories.lots_page.
+    rows, total = repositories.lots_page(conn, coop_id, status, limit, offset)
     conn.close()
     return jsonify({
         "data": [dict(r) for r in rows],
@@ -142,15 +115,7 @@ def get_lot(lot_id):
     The list endpoint is paginated, so a lookup against the first page
     would wrongly 404 lots beyond it."""
     conn = db.get_db()
-    row = conn.execute(
-        "SELECT l.*, c.name AS coop_name, "
-        "(SELECT COUNT(DISTINCT li.farmer_phone) FROM lot_listings ll "
-        " JOIN listings li ON ll.listing_id = li.id "
-        " WHERE ll.lot_id = l.id) AS farmer_count "
-        "FROM lots l LEFT JOIN cooperatives c ON l.coop_id = c.id "
-        "WHERE l.id=?",
-        (lot_id,),
-    ).fetchone()
+    row = repositories.lot_detail(conn, lot_id)
     conn.close()
     if not row:
         return jsonify({"error": "lot not found"}), 404
@@ -189,14 +154,10 @@ def confirm_lot(lot_id):
 @bp.get("/v1/market/lots")
 def market_lots():
     conn = db.get_db()
-    # Newest first, capped at 200: this endpoint had no ORDER BY (row order
-    # was whatever SQLite felt like) and no LIMIT, so every website visit
-    # pulled the entire ready-lots table. 200 matches /v1/lots' max page.
-    rows = conn.execute(
-        "SELECT l.*, c.name_ne, c.name_en FROM lots l "
-        "JOIN crops c ON c.code = l.crop_code "
-        "WHERE l.status='ready' ORDER BY l.created_at DESC LIMIT 200"
-    ).fetchall()
+    # Newest first, capped at 200 (repositories.market_ready_lots):
+    # this endpoint used to have no ORDER BY and no LIMIT, so every
+    # website visit pulled the entire ready-lots table.
+    rows = repositories.market_ready_lots(conn)
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -249,6 +210,79 @@ def place_order():
     }), 201
 
 
+@bp.get("/v1/orders/mine")
+@require_auth
+def my_orders():
+    """The authenticated buyer's own orders, with payment status —
+    read-only. (Settlement itself is staff-only, below.)"""
+    conn = db.get_db()
+    rows = repositories.orders_for_buyer(conn, g.phone)
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@bp.post("/v1/orders/<int:order_id>/settle")
+@require_auth
+@require_staff
+def settle_order(order_id):
+    """Record that an order has been PAID (settled). Staff-only.
+
+    Body: {"amount": N, "method": "cash"|"bank"|"esewa"|"khalti",
+           "reference": "optional staff note / txn reference"}
+
+    This records a payment the co-op made/received through its own
+    channels — there is NO payment-gateway integration, and the
+    method string is what staff attest happened, not a processor
+    confirmation. The amount must equal the order total (quantity ×
+    unit rate): settlement is a full-order event in this state
+    machine (unpaid -> settled), so a partial or wrong amount is a
+    data error, rejected with the expected total. Settling twice is
+    a 409. The check-and-insert runs under BEGIN IMMEDIATE, so two
+    staff settling the same order concurrently can't double-record.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    method = (body.get("method") or "").strip().lower()
+    if method not in repositories.SETTLEMENT_METHODS:
+        return jsonify({
+            "error": f"method must be one of {list(repositories.SETTLEMENT_METHODS)}"
+        }), 400
+    try:
+        amount = float(body.get("amount"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "amount must be a number"}), 400
+    if amount <= 0:
+        return jsonify({"error": "amount must be positive"}), 400
+    reference = (body.get("reference") or "").strip() or None
+
+    conn = db.get_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        order = repositories.get_order(conn, order_id)
+        if not order:
+            return reject(conn, "order not found", 404)
+        if repositories.get_settlement(conn, order_id):
+            return reject(conn, "order is already settled", 409)
+        total = round(order["quantity_kg"] * order["unit_rate"], 2)
+        if abs(amount - total) > 0.01:
+            return reject(
+                conn,
+                f"amount must equal the order total Rs {total:,.2f}", 400)
+        row = repositories.insert_settlement(
+            conn, order_id, amount, method, reference, g.phone)
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({
+        "order_id": order_id,
+        "payment_status": "settled",
+        "amount": row["amount"],
+        "method": row["method"],
+        "reference": row["reference"],
+        "settled_by": row["settled_by"],
+        "settled_at": row["settled_at"],
+    }), 201
+
+
 @bp.post("/v1/offers")
 @require_auth
 @require_self("buyer_phone")
@@ -276,7 +310,7 @@ def make_offer():
         return jsonify({"error": "invalid rate or quantity"}), 400
 
     conn = db.get_db()
-    lot = conn.execute("SELECT * FROM lots WHERE id=?", (body["lot_id"],)).fetchone()
+    lot = repositories.get_lot(conn, body["lot_id"])
     if not lot:
         conn.close()
         return jsonify({"error": "lot not found"}), 404
@@ -305,21 +339,12 @@ def list_offers():
     is_staff = repositories.farmer_is_staff(conn, g.phone)
     lot_id = request.args.get("lot_id")
     buyer_phone = request.args.get("buyer_phone")
-    if not is_staff:
-        if buyer_phone and buyer_phone != g.phone:
-            conn.close()
-            return jsonify({"error": "you can only view your own offers"}), 403
-        buyer_phone = g.phone
-    q = "SELECT * FROM offers WHERE 1=1"
-    params = []
-    if lot_id:
-        q += " AND lot_id=?"; params.append(lot_id)
-    if buyer_phone:
-        q += " AND buyer_phone=?"; params.append(buyer_phone)
-    # Capped like every other list endpoint (Day-5 left this one
-    # unbounded): newest 200 is far past any real negotiation queue.
-    q += " ORDER BY created_at DESC LIMIT 200"
-    rows = conn.execute(q, params).fetchall()
+    if not is_staff and buyer_phone and buyer_phone != g.phone:
+        conn.close()
+        return jsonify({"error": "you can only view your own offers"}), 403
+    rows = repositories.list_offers(
+        conn, is_staff=is_staff, phone=g.phone,
+        lot_id=lot_id, buyer_phone=buyer_phone)
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -403,30 +428,8 @@ def price_trends():
         days = 30
     days = max(7, min(days, 365))
     conn = db.get_db()
-    q = ("SELECT crop_code, date(created_at) AS d, "
-         "SUM(rate_per_kg) AS s, COUNT(*) AS n, MIN(created_at) AS first_seen "
-         "FROM lots WHERE rate_per_kg IS NOT NULL "
-         "AND created_at >= date('now', ?)")
-    params = [f"-{days} days"]
-    if crop_code:
-        q += " AND crop_code=?"; params.append(crop_code)
-    # Aggregate in the DB: the old version transferred every lot row in the
-    # window and grouped in Python. SUM/COUNT come from SQL; the final
-    # round() stays in Python (SQLite ROUND() rounds halves away from zero,
-    # Python rounds half to even — same input must give the same avg_rate).
-    # first_seen ordering preserves the old crop order: crops appear in the
-    # order of their first lot activity in the window.
-    q += " GROUP BY crop_code, d ORDER BY first_seen, crop_code, d"
-    rows = conn.execute(q, params).fetchall()
+    by_crop = repositories.price_trends(conn, crop_code, days)
     conn.close()
-    # Group by crop, then by day (avg rate)
-    by_crop = {}
-    for r in rows:
-        by_crop.setdefault(r["crop_code"], []).append({
-            "date": r["d"],
-            "avg_rate": round(r["s"] / r["n"], 1),
-            "lots": r["n"],
-        })
     return jsonify(by_crop)
 
 
@@ -434,29 +437,18 @@ def price_trends():
 def latest_prices():
     """Latest rate per crop — for the market overview."""
     conn = db.get_db()
-    # One row per crop straight from the DB. The old version fetched EVERY
-    # rated lot in history (ORDER BY created_at DESC, no LIMIT) and walked
-    # them in Python — cost grew with the whole table on each call.
-    rows = conn.execute(
-        "SELECT crop_code, rate_per_kg, pooled_kg, date(created_at) AS d FROM ("
-        "  SELECT *, ROW_NUMBER() OVER ("
-        "    PARTITION BY crop_code ORDER BY created_at DESC, id DESC"
-        "  ) AS rn FROM lots "
-        "  WHERE rate_per_kg IS NOT NULL AND status='ready'"
-        ") WHERE rn = 1 ORDER BY crop_code").fetchall()
+    latest = repositories.latest_prices(conn)
     conn.close()
-    return jsonify({r["crop_code"]: dict(r) for r in rows})
+    return jsonify(latest)
 
 
 @bp.get("/v1/stats")
 def public_stats():
     """Public aggregate stats for the website. No PII, no auth."""
     conn = db.get_db()
-    farmers = conn.execute("SELECT COUNT(*) as c FROM farmers WHERE is_staff=0").fetchone()["c"]
-    coops = conn.execute("SELECT COUNT(*) as c FROM cooperatives").fetchone()["c"]
-    lots = conn.execute("SELECT COUNT(*) as c FROM lots WHERE status='ready'").fetchone()["c"]
+    stats = repositories.public_stats(conn)
     conn.close()
-    resp = jsonify({"farmers": farmers, "coops": coops, "active_lots": lots})
+    resp = jsonify(stats)
     # Cacheable for 60s — stats don't change every second, and this endpoint
     # is hit by every website visitor. Reduces DB load under traffic.
     resp.headers["Cache-Control"] = "public, max-age=60"

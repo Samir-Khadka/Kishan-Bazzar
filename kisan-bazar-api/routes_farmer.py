@@ -2,22 +2,11 @@
 here is bound to the authenticated farmer (require_auth +
 phone-match), so one farmer can never read or write another's
 records."""
-import os
-import re
-
-from flask import Blueprint, request, jsonify, g, current_app
+from flask import Blueprint, g, jsonify, request
 
 import db
-import aggregation
-import auth
-import assistant
 import repositories
-import availability
-from web import (
-    DEMO_MODE, DEFAULT_TARGET_KG, MAX_REASONABLE_KG,
-    require_auth, require_self, require_staff, idempotent,
-    valid_positive_kg, reject,
-)
+from web import require_auth, require_self
 
 bp = Blueprint("farmer", __name__)
 
@@ -43,7 +32,7 @@ def save_land_scan(phone):
         return jsonify({"error": f"confidence must be one of {sorted(VALID_CONFIDENCE)}"}), 400
 
     conn = db.get_db()
-    farmer = conn.execute("SELECT * FROM farmers WHERE phone=?", (phone,)).fetchone()
+    farmer = repositories.get_farmer(conn, phone)
     if not farmer:
         conn.close()
         return jsonify({"error": "unknown farmer"}), 404
@@ -58,7 +47,7 @@ def save_land_scan(phone):
     scan_id = cur.lastrowid
     conn.execute("UPDATE farmers SET land_type=? WHERE phone=?", (body["land_type"], phone))
     conn.commit()
-    row = conn.execute("SELECT * FROM land_scans WHERE id=?", (scan_id,)).fetchone()
+    row = repositories.get_land_scan(conn, scan_id)
     conn.close()
     return jsonify(dict(row)), 201
 
@@ -68,10 +57,7 @@ def save_land_scan(phone):
 @require_self("phone")
 def latest_land_scan(phone):
     conn = db.get_db()
-    row = conn.execute(
-        "SELECT * FROM land_scans WHERE farmer_phone=? ORDER BY created_at DESC, id DESC LIMIT 1",
-        (phone,),
-    ).fetchone()
+    row = repositories.latest_land_scan(conn, phone)
     conn.close()
     if not row:
         return jsonify({"error": "no scan on file for this farmer"}), 404
@@ -83,10 +69,7 @@ def latest_land_scan(phone):
 @require_self("phone")
 def land_scan_history(phone):
     conn = db.get_db()
-    rows = conn.execute(
-        "SELECT * FROM land_scans WHERE farmer_phone=? ORDER BY created_at DESC, id DESC",
-        (phone,),
-    ).fetchall()
+    rows = repositories.land_scan_history(conn, phone)
     conn.close()
     return jsonify([dict(r) for r in rows])
 

@@ -1,0 +1,1 @@
+{"description":"Node test harness (vm-based) and the axe-core/jsdom accessibility audit for the Kisan Bazar app. No build step: run the test_*.js files and audit_a11y.js directly with node.","devDependencies":{"axe-core":"4.14.0","jsdom":"30.1.3"},"name":"kisan-bazar-jstests","private":true}

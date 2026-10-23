@@ -11,7 +11,6 @@ Postgres schema later — every function here has an obvious PostGIS
 equivalent (haversine_km -> ST_DWithin / ST_Distance).
 """
 import math
-import uuid
 
 
 def haversine_km(lat1, lon1, lat2, lon2):

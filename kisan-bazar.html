@@ -25,6 +25,7 @@
   --paddy:#17583C;
   --paddy-deep:#0E3826;
   --tori:#E9B008;
+  --tori-text:#8A6100;
   --tori-soft:#FBEDBE;
   --soil:#7A4A24;
   --alert:#BE3218;
@@ -45,6 +46,7 @@
     --ink:#E8EFE9; --ink-2:#A7B6AD; --ink-3:#8A9A90;
     --paper:#10150F; --card:#1A211B; --line:#2C3830;
     --tori-soft:#3A2F08; --alert-soft:#3A180F;
+    --tori-text:#E9B008; --alert:#E86A52;
     --paddy:#3E9D6E; --paddy-deep:#0B2A1C;
   }
 }
@@ -52,6 +54,7 @@
   --ink:#E8EFE9; --ink-2:#A7B6AD; --ink-3:#8A9A90;
   --paper:#10150F; --card:#1A211B; --line:#2C3830;
   --tori-soft:#3A2F08; --alert-soft:#3A180F;
+  --tori-text:#E9B008; --alert:#E86A52;
   --paddy:#3E9D6E; --paddy-deep:#0B2A1C;
 }
 
@@ -948,7 +951,7 @@ const TABS = {
   farmer:[["today","🏠","आज","Today"],["sell","🧺","बेच्ने","Sell"],["advice","🌱","सल्लाह","Advice"],["doctor","🩺","डा. किसान","Crop Doctor"],["rental","🚜","भाडा","Rent"],["mine","👤","मेरो","Mine"]],
   buyer: [["market","🛒","बजार","Market"],["cart","🧾","अर्डर","Order"],["offers","💬","अफरहरू","Offers"],["how","❓","कसरी","How"]],
   coop:  [["pool","📥","आएका","Incoming"],["route","🚚","बाटो","Route"],["board","📊","हिसाब","Board"]],
-  admin: [["admin_overview","📊","ड्यासबोर्ड","Dashboard"],["admin_farmers","👨‍🌾","किसान","Farmers"],["admin_lots","📦","लट सूची","Lots"],["admin_offers","💬","अफरहरू","Offers"],["admin_rates","📈","भाउ अपडेट","Rates"]]
+  admin: [["admin_overview","📊","ड्यासबोर्ड","Dashboard"],["admin_farmers","👨‍🌾","किसान","Farmers"],["admin_lots","📦","लट सूची","Lots"],["admin_offers","💬","अफरहरू","Offers"],["admin_orders","🧾","अर्डरहरू","Orders"],["admin_rates","📈","भाउ अपडेट","Rates"]]
 };
 
 /* Professional stroke icons (24x24, currentColor) replacing emoji in nav.
@@ -971,6 +974,7 @@ const ICONS = {
   admin_farmers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20c0-3-2.5-5-5.5-5.3"/></svg>',
   admin_lots: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>',
   admin_offers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  admin_orders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6"/></svg>',
   admin_rates: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>'
 };
 
@@ -2125,7 +2129,7 @@ function viewMine(){
   <div class="stack">
     <div class="kpi">
       <div><b>${esc(T("यो सिजन पाएको","Received this season"))}</b><i style="color:var(--paddy)">${esc(money(paid))}</i></div>
-      <div><b>${esc(T("आउन बाँकी","Pending"))}</b><i style="color:var(--tori)">${esc(money(due))}</i></div>
+      <div><b>${esc(T("आउन बाँकी","Pending"))}</b><i style="color:var(--tori-text)">${esc(money(due))}</i></div>
     </div>
     <div class="card" style="padding:0">
       ${S.offers.length ? S.offers.map(offerRow).join("")
@@ -2581,7 +2585,77 @@ function viewPool(){
   </div>`;
 }
 
+let routeCache = {data:null, at:0, err:null};
+async function fetchCoopRoute(){
+  if(routeCache.data && Date.now() - routeCache.at < 60000) return routeCache.data;
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/coop/route`, {
+      headers: {"Authorization": `Bearer ${account.token}`}
+    });
+    if(!res.ok) throw new Error(res.status === 403 ? T("स्टाफ पहुँच आवश्यक छ","Staff access required") : `server ${res.status}`);
+    routeCache = {data: await res.json(), at: Date.now(), err: null};
+    return routeCache.data;
+  }catch(e){
+    routeCache = {data: null, at: 0, err: e.message || "fetch failed"};
+    // refreshOnce won't re-render on a null result; surface the error
+    // state directly (same reason adminLoadState chains its own catch).
+    render({skipScroll:true});
+    return null;
+  }
+}
+
+function renderRealRoute(rt){
+  const t = rt.totals || {};
+  const cropOf = code => CROPS[CROP_CODE_MAP[code]] || {ne:code, en:code, ic:"🌾"};
+  const stopRow = s => {
+    const isPickup = s.kind === "pickup";
+    const detail = isPickup
+      ? `${(s.crops||[]).map(c=>esc(T(cropOf(c).ne, cropOf(c).en))).join(", ")} · ${esc((s.lots||[]).join(", "))}`
+      : `${esc(N(s.orders||1))} ${esc(T("अर्डर","order(s)"))}`;
+    return `<div class="item">
+      <div style="font-weight:800;font-size:16px;min-width:34px;color:var(--paddy)">${esc(N(s.seq))}</div>
+      <div class="em" aria-hidden="true">${isPickup ? "🧺" : "📦"}</div>
+      <div class="bd"><b>${esc(s.name)}</b>
+        <p>${detail} · ${esc(N(s.kg))} ${esc(T("के.जी.","kg"))}</p></div>
+      <div style="font-size:12px;color:var(--ink-3);white-space:nowrap">≈ ${esc(N(s.leg_km))} ${esc(T("कि.मि.","km"))}</div>
+    </div>`;
+  };
+  const unlocated = (rt.unlocated && rt.unlocated.deliveries) || [];
+  return `<div class="stack">
+    <div class="card" style="border-left:7px solid var(--paddy)">
+      <div class="warn-line" style="font-size:19px">${esc(T("संकलन बाटो","Collection route"))} · ${esc(rt.coop.name)}</div>
+      <div class="warn-sub">${esc(N(t.stops||0))} ${esc(T("बिसौनी","stops"))} · ${esc(T("टिप्ने","Pickup"))} ${esc(N(t.pickup_kg||0))} ${esc(T("के.जी.","kg"))} · ${esc(T("बुझाउने","Deliver"))} ${esc(N(t.delivery_kg||0))} ${esc(T("के.जी.","kg"))}</div>
+      <div class="warn-sub">${esc(T("अनुमानित सीधा दूरी","Estimated straight-line distance"))}: ≈ ${esc(N(t.est_distance_km||0))} ${esc(T("कि.मि. (फिर्तीसहित)","km (incl. return)"))}</div>
+    </div>
+    ${rt.stops && rt.stops.length ? `<div class="card" style="padding:0">${rt.stops.map(stopRow).join("")}</div>`
+      : `<div class="card"><div class="empty"><span class="ic">🚚</span><b>${esc(T("अहिले संकलन गर्नुपर्ने लट छैन","No lots awaiting collection right now"))}</b></div></div>`}
+    ${unlocated.length ? `<div class="card">
+      <div class="lbl">${esc(T("स्थान दर्ता नभएका क्रेता","Buyers with no registered location"))}</div>
+      ${unlocated.map(d=>`<div class="item" style="border:0;padding:6px 0"><div class="bd">
+        <b>${esc(d.name)}</b><p>${esc(N(d.kg))} ${esc(T("के.जी.","kg"))} · ${esc(d.phone)}</p></div></div>`).join("")}
+      <p style="font-size:13px;color:var(--ink-2)">${esc(T("यी क्रेताको स्थान दर्ता छैन — डेलिभरी फोन गरेर मिलाउनुहोस्।","These buyers have no registered location — arrange delivery by phone."))}</p>
+    </div>` : ""}
+  </div>`;
+}
+
 function viewRoute(){
+  // REAL route when a staff user is signed in: computed server-side
+  // from live operations (GET /v1/coop/route) — pickup stops are the
+  // farmers who pooled into ready lots, delivery stops are real
+  // orders, distances are labelled haversine estimates. The badge
+  // comes OFF only for that rendering; the sample content below
+  // stays badged, as before.
+  if(account.isStaff && BACKEND.enabled && account.token){
+    if(routeCache.err) return `<div class="stack">
+      <div class="card" style="border-left:7px solid var(--alert)">
+        <p>⚠️ ${esc(routeCache.err)}</p>
+        <button class="btn" id="routeRetryBtn" style="margin-top:10px">${esc(T("फेरि प्रयास गर्नुहोस्","Retry"))}</button>
+      </div>
+    </div>`;
+    if(isStale(routeCache, 60000)) refreshOnce("route", ()=>routeCache.data, fetchCoopRoute);
+    if(routeCache.data) return renderRealRoute(routeCache.data);
+    return `<div class="stack"><div class="card"><p>${esc(T("बाटो लोड हुँदैछ...","Loading route..."))}</p></div></div>`;
+  }
   const stops = [
     ["६:३०","6:30","धुलिखेल-४","Dhulikhel-4","२ किसान · ९० के.जी.","2 farmers · 90 kg"],
     ["७:१५","7:15","धुलिखेल-९","Dhulikhel-9","१ किसान · ४४ के.जी.","1 farmer · 44 kg"],
@@ -2863,6 +2937,69 @@ async function decideOffer(offerId, decision, counterRate){
   render({skipScroll:true});
 }
 
+function viewAdminOrders(){
+  const guard = viewAdminGuard();
+  if(guard) return guard;
+  const _s = adminLoadState();
+  if(_s.state !== "ready") return _s.html;
+  const d = _s.data;
+  const orders = d.orders || [];
+  const unpaid = orders.filter(o=>o.payment_status !== "settled");
+  const settled = orders.filter(o=>o.payment_status === "settled");
+  const total = o => Math.round((o.quantity_kg||0) * (o.unit_rate||0) * 100) / 100;
+  const row = o => {
+    const isSettled = o.payment_status === "settled";
+    return `<div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <b>${esc(o.buyer_name)} <span style="color:var(--ink-3);font-weight:400">${esc(o.buyer_phone||"")}</span></b>
+        <span class="pill">${esc(o.lot_id)}</span>
+      </div>
+      <p>${esc(N(o.quantity_kg))} kg × ${esc(money(o.unit_rate))} = <b>${esc(money(total(o)))}</b></p>
+      ${isSettled
+        ? `<p style="margin-top:6px">✅ ${esc(T("चुक्ता भयो","Settled"))} · ${esc(o.settlement_method||"")} · ${esc(money(o.settled_amount||0))}${o.settlement_reference ? " · "+esc(o.settlement_reference) : ""}</p>`
+        : `<p style="margin-top:6px;color:var(--tori-text)">⏳ ${esc(T("भुक्तानी बाँकी","Payment pending"))}</p>
+           <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+             <input id="settle-amt-${o.id}" type="number" min="0" step="0.01" value="${total(o)}" aria-label="${esc(T("रकम","Amount"))}" style="flex:1;min-width:100px;padding:8px;border:1px solid var(--line);border-radius:8px">
+             <select id="settle-method-${o.id}" aria-label="${esc(T("माध्यम","Method"))}" style="flex:1;min-width:100px;padding:8px;border:1px solid var(--line);border-radius:8px">
+               <option value="cash">${esc(T("नगद","Cash"))}</option>
+               <option value="bank">${esc(T("बैंक","Bank"))}</option>
+               <option value="esewa">eSewa</option>
+               <option value="khalti">${esc(T("खल्ती","Khalti"))}</option>
+             </select>
+             <input id="settle-ref-${o.id}" type="text" maxlength="80" placeholder="${esc(T("सन्दर्भ (ऐच्छिक)","Reference (optional)"))}" style="flex:1;min-width:120px;padding:8px;border:1px solid var(--line);border-radius:8px">
+             <button class="btn" data-settle-order="${o.id}" style="flex:0 0 auto;padding:8px 14px">💸 ${esc(T("चुक्ता गर्नुहोस्","Settle"))}</button>
+           </div>
+           <p style="font-size:12px;color:var(--ink-3);margin-top:6px">${esc(T("रकम सहकारीले पाएको/बुझाएको माध्यम मात्र दर्ता हुन्छ — यो अनलाइन भुक्तानी होइन।","This records how the co-op actually received/paid the money — it is not an online payment."))}</p>`}
+    </div>`;
+  };
+  return `<div class="stack">
+    <h2 class="sec">${esc(T("भुक्तानी बाँकी अर्डर","Unpaid orders"))} (${unpaid.length})</h2>
+    ${unpaid.length ? unpaid.map(row).join("") : `<div class="card"><p>${esc(T("सबै अर्डर चुक्ता छन्।","All orders are settled."))}</p></div>`}
+    ${settled.length ? `<h2 class="sec">${esc(T("चुक्ता भएका","Settled"))} (${settled.length})</h2>${settled.slice(0,10).map(row).join("")}` : ""}
+  </div>`;
+}
+
+async function doSettleOrder(orderId){
+  const amt = parseFloat((document.getElementById("settle-amt-"+orderId)||{}).value);
+  const method = (document.getElementById("settle-method-"+orderId)||{}).value || "cash";
+  const reference = ((document.getElementById("settle-ref-"+orderId)||{}).value || "").trim();
+  if(!(amt > 0)){ toast(T("सही रकम लेख्नुहोस्","Enter a valid amount")); return; }
+  try{
+    const body = {amount: amt, method};
+    if(reference) body.reference = reference;
+    const res = await fetch(`${BACKEND.baseUrl}/v1/orders/${orderId}/settle`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json","Authorization":`Bearer ${account.token}`},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || res.status);
+    adminCache = {data:null, at:0}; // overview carries the new status
+    toast(T("चुक्ता भयो","Settled"));
+  }catch(e){ toast(T("सकिएन: ","Failed: ")+(e.message||"")); }
+  render({skipScroll:true});
+}
+
 function viewAdminRates(){
   const guard = viewAdminGuard();
   if(guard) return guard;
@@ -2899,7 +3036,7 @@ const VIEWS = {today:viewToday, sell:viewSell, advice:viewAdvice, doctor:viewDoc
                 market:viewMarket, cart:viewCart, offers:viewMyOffers, how:viewHow,
                 pool:viewPool, route:viewRoute, board:viewBoard,
                 admin_overview:viewAdminOverview, admin_farmers:viewAdminFarmers,
-                admin_lots:viewAdminLots, admin_offers:viewAdminOffers, admin_rates:viewAdminRates};
+                admin_lots:viewAdminLots, admin_offers:viewAdminOffers, admin_orders:viewAdminOrders, admin_rates:viewAdminRates};
 
 function render(opts){
   opts = opts || {};
@@ -2995,7 +3132,9 @@ document.addEventListener("click", e=>{
 
   if(t.id==="gotoLoginBtn"){ S.role="farmer"; S.tab="mine"; render(); return; }
   if(t.id==="adminRetryBtn"){ adminCache = {data:null, at:0}; render({skipScroll:true}); return; }
+  if(t.id==="routeRetryBtn"){ routeCache = {data:null, at:0, err:null}; render({skipScroll:true}); return; }
   if(t.dataset.confirmLot){ doConfirmLot(t.dataset.confirmLot); return; }
+  if(t.dataset.settleOrder){ doSettleOrder(t.dataset.settleOrder); return; }
   if(t.dataset.zone){ S.zone=t.dataset.zone; render(); return; }
   if(t.dataset.land){ S.land=t.dataset.land; render(); return; }
 

@@ -45,7 +45,7 @@ def run():
     assert r.status_code == 200
     latest = r.get_json()
     assert latest["land_type"] == "khet"
-    print(f"  PASS — latest scan shows land_type=khet")
+    print("  PASS — latest scan shows land_type=khet")
 
     print("\n=== 4. Rescan without a photo (skip-photo path) -> balaute, lower confidence ===")
     r = client.post(f"/v1/farmers/{phone}/land-scan", json={

@@ -8,7 +8,7 @@ specifically tries to do the things an attacker would try: forge a
 token, replay a used code, brute-force a code, guess someone else's
 identity, and read another farmer's data with a token of their own.
 """
-import sys, os, time
+import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import seed
@@ -31,7 +31,7 @@ def run():
     assert r.status_code == 200, r.get_json()
     assert len(auth._dev_outbox) == 1, "a code should have been 'sent' (appended to the dev outbox)"
     sent_code = auth._dev_outbox[-1]["code"]
-    print(f"  code requested OK (never appears in the HTTP response body — only in the mock outbox)")
+    print("  code requested OK (never appears in the HTTP response body — only in the mock outbox)")
 
     r = client.post("/v1/auth/verify", json={"phone": PHONE, "code": sent_code})
     assert r.status_code == 200, r.get_json()
@@ -54,12 +54,12 @@ def run():
     wrong_code = f"{(int(real_code) + 1) % 1000000:06d}"
     r = client.post("/v1/auth/verify", json={"phone": PHONE, "code": wrong_code})
     assert r.status_code == 401, r.get_json()
-    print(f"  PASS — wrong code rejected with 401")
+    print("  PASS — wrong code rejected with 401")
 
     print("\n=== 4. A code for phone A cannot verify phone B, even if guessed correctly ===")
     r = client.post("/v1/auth/verify", json={"phone": OTHER_PHONE, "code": real_code})
     assert r.status_code == 401, r.get_json()
-    print(f"  PASS — a code is bound to its own phone number, not just 'any valid code'")
+    print("  PASS — a code is bound to its own phone number, not just 'any valid code'")
 
     print("\n=== 5. Codes never appear in ANY HTTP response body ===")
     auth._attempts.clear()
@@ -68,7 +68,7 @@ def run():
     real_code = auth._dev_outbox[-1]["code"]
     assert real_code not in body_text, \
         "CRITICAL: the verification code must never be returned in the API response"
-    print(f"  PASS — response body contains no trace of the actual code")
+    print("  PASS — response body contains no trace of the actual code")
 
     print("\n=== 6. Rate limiting: request-code capped per phone ===")
     auth._attempts.clear()
@@ -105,7 +105,7 @@ def run():
     forged_attempts = [
         "Bearer garbage",
         "Bearer " + "a"*200,
-        "Bearer eyJwaG9uZSI6IjAwMDAwMDAwMDAiLCJleHAiOjk5OTk5OTk5OTl9.deadbeef",  # right shape, wrong signature
+        "Bearer eyJwaG9uZSI6IjAwMDAwMDAwMDAiLCJleHAiOjk5OTk5OTk5OTl9.deadbee",  # right shape, wrong signature
         "NotBearer sometoken",
         "",
     ]
@@ -143,7 +143,7 @@ def run():
     # is checked before the resource lookup, so existence of a lot is never
     # leaked to a caller who wouldn't be allowed to act on it anyway
     assert r.status_code == 403, f"expected 403 (staff-only) before 404 (not found), got {r.status_code}: {r.get_json()}"
-    print(f"  PASS — authorization checked before resource existence (no information leak)")
+    print("  PASS — authorization checked before resource existence (no information leak)")
 
     print("\n=== 13. Unhandled server errors never leak internals ===")
     r = client.post("/v1/listings", json="not-a-json-object", headers={"Authorization": f"Bearer {token_a}"})

@@ -38,7 +38,7 @@ def sms_conversation(phone, messages, title):
     for m in messages:
         reply = handle_sms(phone, m)
         print(f"  farmer sends: {m}")
-        print(f"  reply:        " + reply.replace("\n", "\n                "))
+        print("  reply:        " + reply.replace("\n", "\n                "))
     rule()
 
 

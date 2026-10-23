@@ -45,7 +45,7 @@ def run():
     print("=== 1. Signup without a token is rejected ===")
     r = client.post("/v1/auth/signup", json={"phone": "9841099999", "name": "Attacker"})
     assert r.status_code == 401, r.get_json()
-    print(f"  PASS — rejected with 401")
+    print("  PASS — rejected with 401")
     passed += 1
 
     print("\n=== 2. Signup cannot self-grant staff ===")
@@ -54,7 +54,7 @@ def run():
                     json={"phone": PHONE, "name": "Sarita Tamang", "role": "admin", "is_staff": True},
                     headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 400, r.get_json()
-    print(f"  PASS — invalid role rejected with 400")
+    print("  PASS — invalid role rejected with 400")
     passed += 1
 
     print("\n=== 3. Signup for someone else's number is rejected ===")
@@ -62,7 +62,7 @@ def run():
                     json={"phone": OTHER_PHONE, "name": "Impostor"},
                     headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 403, r.get_json()
-    print(f"  PASS — rejected with 403")
+    print("  PASS — rejected with 403")
     passed += 1
 
     print("\n=== 4. Dev OTP endpoint is 404 without DEMO_MODE ===")
@@ -70,7 +70,7 @@ def run():
     client.post("/v1/auth/request-code", json={"phone": PHONE})
     r = client.get(f"/v1/dev/latest-code/{PHONE}")
     assert r.status_code == 404, r.get_json()
-    print(f"  PASS — 404 when DEMO_MODE is off")
+    print("  PASS — 404 when DEMO_MODE is off")
     passed += 1
 
     print("\n=== 5. Dev OTP endpoint works with DEMO_MODE on ===")
@@ -79,7 +79,7 @@ def run():
         r = client.get(f"/v1/dev/latest-code/{PHONE}")
         assert r.status_code == 200, r.get_json()
         assert "code" in r.get_json()
-        print(f"  PASS — 200 with code when DEMO_MODE is on")
+        print("  PASS — 200 with code when DEMO_MODE is on")
     finally:
         routes_auth.DEMO_MODE = False
     passed += 1
@@ -93,7 +93,7 @@ def run():
     r = client.get("/v1/admin/overview", headers={"Authorization": f"Bearer {staff_token}"})
     assert r.status_code == 200, r.get_json()
     assert "sms_outbox" not in r.get_json(), "OTP outbox must never be exposed"
-    print(f"  PASS — 401 anonymous, 403 farmer, 200 staff, no OTP leak")
+    print("  PASS — 401 anonymous, 403 farmer, 200 staff, no OTP leak")
     passed += 1
 
     print("\n=== 7. Listing ignores forged coop_id ===")
@@ -106,7 +106,7 @@ def run():
     r = client.get("/v1/listings/mine", headers={"Authorization": f"Bearer {token}"})
     mine = [l for l in r.get_json() if l["id"] == listing_id]
     assert mine and mine[0]["coop_id"] == "kavre-veg", mine
-    print(f"  PASS — listing landed in the farmer's real coop, not 'evil-coop'")
+    print("  PASS — listing landed in the farmer's real coop, not 'evil-coop'")
     passed += 1
 
     print("\n=== 8. Orders cannot oversell a lot ===")

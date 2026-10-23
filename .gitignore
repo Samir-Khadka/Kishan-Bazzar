@@ -46,3 +46,6 @@ desktop.ini
 *.log
 kisan_test_outbox.jsonl
 .seed.lock
+
+# Coverage data
+.coverage

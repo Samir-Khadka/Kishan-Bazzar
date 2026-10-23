@@ -177,6 +177,24 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Order settlement: staff record that an order has been PAID. One row
+-- per order (UNIQUE). There is deliberately no gateway integration —
+-- `method` records how the co-op says it was paid (cash / bank /
+-- esewa / khalti) and `reference` is the staff-recorded note or
+-- transaction reference for that payment; nothing here claims a
+-- payment processor verified anything. An order with no row here is
+-- 'unpaid'; with a row, 'settled'. The status is derived from this
+-- table everywhere (never a flag on orders), so it can't drift.
+CREATE TABLE IF NOT EXISTS order_settlements (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id        INTEGER NOT NULL UNIQUE REFERENCES orders(id),
+    amount          REAL NOT NULL,
+    method          TEXT NOT NULL CHECK (method IN ('cash','bank','esewa','khalti')),
+    reference       TEXT,
+    settled_by      TEXT NOT NULL,
+    settled_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Phone-verification codes for login. A code is single-use (consumed_at
 -- set once redeemed) and short-lived (expires_at). Codes are stored
 -- hashed, not in plaintext — even a full database read doesn't hand an

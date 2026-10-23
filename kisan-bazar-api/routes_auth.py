@@ -3,21 +3,13 @@ admin password login, farmer signup, and /v1/me (the caller's own
 profile). Shared auth invariants live in web.py; token mechanics
 in auth.py."""
 import os
-import re
 
-from flask import Blueprint, request, jsonify, g, current_app
+from flask import Blueprint, current_app, g, jsonify, request
 
-import db
-import aggregation
 import auth
-import assistant
+import db
 import repositories
-import availability
-from web import (
-    DEMO_MODE, DEFAULT_TARGET_KG, MAX_REASONABLE_KG,
-    require_auth, require_self, require_staff, idempotent,
-    valid_positive_kg, reject,
-)
+from web import DEMO_MODE, require_auth, require_self
 
 bp = Blueprint("auth", __name__)
 
@@ -34,9 +26,6 @@ def request_code():
     if not auth.check_rate_limit(f"request-code:{phone}", max_attempts=3, window_seconds=600):
         return jsonify({"error": "too many code requests for this number, try again later"}), 429
 
-    conn = db.get_db()
-    farmer = conn.execute("SELECT phone FROM farmers WHERE phone=?", (phone,)).fetchone()
-    conn.close()
     # Codes are issued for unknown numbers too — otherwise no new farmer
     # could ever register (signup requires a verified OTP token). This is
     # safe: the code goes to the phone's owner via SMS, so requesting a code
@@ -44,7 +33,7 @@ def request_code():
     # sees it. SMS-spam is bounded by the rate limit above.
     # The response is identical either way — no phone-number enumeration.
     conn = db.get_db()
-    code = auth.create_auth_code(conn, phone)
+    auth.create_auth_code(conn, phone)
     conn.close()
     # NEVER log the code itself — server logs (Render's log stream
     # included) are readable by anyone with dashboard access, and a
@@ -112,7 +101,7 @@ def admin_login():
     # Mint a staff token for the admin phone (created in seed).
     # issue_token embeds the phone; role=staff is read from the DB.
     conn = db.get_db()
-    row = conn.execute("SELECT phone, name, role FROM farmers WHERE phone='9801100000'").fetchone()
+    row = repositories.get_farmer(conn, "9801100000")
     conn.close()
     if not row:
         return jsonify({"error": "admin account not set up"}), 500
@@ -185,11 +174,11 @@ def signup():
         return jsonify({"error": "unknown land_type"}), 400
 
     conn = db.get_db()
-    coop = conn.execute("SELECT id FROM cooperatives WHERE id=?", (coop_id,)).fetchone()
+    coop = repositories.get_cooperative(conn, coop_id)
     if not coop:
         conn.close()
         return jsonify({"error": "unknown coop_id"}), 400
-    existing = conn.execute("SELECT phone FROM farmers WHERE phone=?", (phone,)).fetchone()
+    existing = repositories.get_farmer(conn, phone)
     if existing:
         conn.execute("UPDATE farmers SET name=?, land_type=?, payout_method=?, role=? WHERE phone=?", (name, land_type, payout_method, role, phone))
     else:
@@ -219,12 +208,15 @@ def me():
     form instead of assuming the account exists."""
     phone = g.phone
     conn = db.get_db()
-    row = conn.execute(
-        "SELECT phone, name, role, coop_id, payout_method, land_type, is_staff "
-        "FROM farmers WHERE phone=?", (phone,)).fetchone()
+    farmer = repositories.get_farmer(conn, phone)
     conn.close()
-    if not row:
+    if not farmer:
         return jsonify({"error": "no profile yet", "phone": phone}), 404
-    d = dict(row)
-    d["isStaff"] = bool(d.pop("is_staff"))
+    d = {
+        "phone": farmer["phone"], "name": farmer["name"],
+        "role": farmer["role"], "coop_id": farmer["coop_id"],
+        "payout_method": farmer["payout_method"],
+        "land_type": farmer["land_type"],
+    }
+    d["isStaff"] = bool(farmer["is_staff"])
     return jsonify(d)

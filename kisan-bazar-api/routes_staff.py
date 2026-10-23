@@ -1,21 +1,12 @@
-"""Staff routes: the co-op admin overview. Staff-only — it exposes
-farmer PII, so require_staff guards every route here."""
-import os
-import re
-
-from flask import Blueprint, request, jsonify, g, current_app
+"""Staff routes: the co-op admin overview and the collection route.
+Staff-only — both expose farmer PII (names, locations), so
+require_staff guards every route here."""
+from flask import Blueprint, g, jsonify
 
 import db
-import aggregation
-import auth
-import assistant
 import repositories
-import availability
-from web import (
-    DEMO_MODE, DEFAULT_TARGET_KG, MAX_REASONABLE_KG,
-    require_auth, require_self, require_staff, idempotent,
-    valid_positive_kg, reject,
-)
+import routing
+from web import require_auth, require_staff
 
 bp = Blueprint("staff", __name__)
 
@@ -24,37 +15,29 @@ bp = Blueprint("staff", __name__)
 @require_auth
 @require_staff
 def admin_overview():
-    """Co-op staff dashboard data. Staff-only: this exposes farmer PII."""
+    """Co-op staff dashboard data. Staff-only: this exposes farmer PII.
+    The payload is a read model (repositories.admin_overview) — this
+    handler only guards and serializes."""
     conn = db.get_db()
-    farmers = conn.execute("SELECT phone, name, coop_id, lat, lon, payout_method, land_type, is_staff FROM farmers").fetchall()
-    listings = conn.execute("SELECT id, farmer_phone, coop_id, crop_code, grade, quantity_kg, quantity_committed_kg, status, created_at FROM listings ORDER BY id DESC LIMIT 50").fetchall()
-    # Row payloads capped: lots/orders grow per transaction, and the admin
-    # dashboard only renders the 5 most recent lots. Totals come from
-    # COUNT(*)/SUM(*) so the KPI cards stay exact past the cap.
-    lots = conn.execute("SELECT id, coop_id, crop_code, grade, target_kg, pooled_kg, rate_per_kg, status, created_at FROM lots ORDER BY created_at DESC LIMIT 200").fetchall()
-    crops = conn.execute("SELECT code, name_ne, name_en, shelf_life_hours FROM crops").fetchall()
-    orders = conn.execute("SELECT id, buyer_name, lot_id, quantity_kg, unit_rate, created_at FROM orders ORDER BY id DESC LIMIT 200").fetchall()
-    total_lots = conn.execute("SELECT COUNT(*) AS c FROM lots").fetchone()["c"]
-    total_orders = conn.execute("SELECT COUNT(*) AS c FROM orders").fetchone()["c"]
-    total_listings = conn.execute("SELECT COUNT(*) AS c FROM listings").fetchone()["c"]
-    # total_kg must aggregate the whole table: the old code summed only the
-    # 50 fetched listings, so the KPI silently undercounted past 50 listings.
-    total_kg = conn.execute("SELECT COALESCE(SUM(quantity_kg), 0) AS s FROM listings").fetchone()["s"]
-    pooled_kg = conn.execute("SELECT COALESCE(SUM(pooled_kg), 0) AS s FROM lots").fetchone()["s"]
+    overview = repositories.admin_overview(conn)
     conn.close()
+    return jsonify(overview)
 
-    return jsonify({
-        "farmers": [dict(r) for r in farmers],
-        "listings": [dict(r) for r in listings],
-        "lots": [dict(r) for r in lots],
-        "crops": [dict(r) for r in crops],
-        "orders": [dict(r) for r in orders],
-        "counts": {
-            "farmers": len(farmers),
-            "listings": total_listings,
-            "lots": total_lots,
-            "orders": total_orders,
-            "total_kg": round(total_kg, 1),
-            "pooled_kg": round(pooled_kg, 1)
-        }
-    })
+
+@bp.get("/v1/coop/route")
+@require_auth
+@require_staff
+def coop_route():
+    """The collection route for the staff member's co-op, computed
+    from live data (routing.collection_route): pickup stops at
+    farmers who pooled into ready lots, delivery stops at buyers who
+    ordered from them, sequenced nearest-neighbour from the co-op,
+    distances as labelled haversine estimates. Staff-only — it
+    carries farmer names, phones and coordinates."""
+    conn = db.get_db()
+    me = repositories.get_farmer(conn, g.phone)
+    route = routing.collection_route(conn, me["coop_id"]) if me else None
+    conn.close()
+    if route is None:
+        return jsonify({"error": "co-op not found for this account"}), 404
+    return jsonify(route)

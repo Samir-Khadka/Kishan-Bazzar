@@ -79,7 +79,7 @@ vm.createContext(sandbox);
 const EXPORT_LIST = [
   "N","money","esc","T","classifySoilColor","rgbToHsl","combineLandType","LAND_TYPE_SUPPORT",
   "RULES","LANDS","ZONES","CROPS","WEATHER","LOTS","BS_MONTHS","BS_EN","BS_NOW","BS_YEAR",
-  "S","sell","scan","offerRow","viewToday","viewSell","viewAdvice","viewMine",
+  "S","sell","scan","offerRow","viewToday","viewSell","viewAdvice","viewMine","viewDoctor",
   "viewMarket","viewCart","viewHow","viewPool","viewRoute","viewBoard","render","header","nav",
   "chat","assistantReply","findCropInText","scoreIntent","defaultChips","renderSahayak",
   "sendChatMessage","CROP_ALIASES","INTENT_KEYWORDS","sahayakSeen",
@@ -87,6 +87,8 @@ const EXPORT_LIST = [
   "apiSaveLandScan","apiGetLandScan",
   "doRequestCode","doVerifyCode","handlePostBtn","renderAccountPanel",
   "isStale","refreshOnce","renderPriceTrends","viewRental","viewMyOffers","viewAdminOffers",
+  "viewAdminOrders","doSettleOrder","fetchCoopRoute","renderRealRoute",
+  "viewAdminOverview","viewAdminFarmers","viewAdminLots","viewAdminRates",
   "doPlaceOrder","doSubmitOffer","trendsCache","rentalsCache","myOffersCache","adminOffersCache"
 ];
 const combined = appJs + `\n;globalThis.__test = {${EXPORT_LIST.join(",")}};`;

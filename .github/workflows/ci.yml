@@ -1,0 +1,57 @@
+name: CI
+
+# Every suite, on every push and PR — the same commands a developer
+# runs locally (see the A+ report, 2026-10-23). Nothing is skipped:
+# if a suite cannot run here, the suite gets fixed, not the gate.
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Python dependencies
+        run: pip install -r kisan-bazar-api/requirements.txt coverage pyflakes
+
+      - name: Lint (pyflakes, zero tolerance)
+        run: pyflakes kisan-bazar-api/*.py kisan-bazar-api/tests/*.py kisan-bazar-sms/sms.py kisan-bazar-sms/tests/*.py
+
+      - name: Python suites with coverage gate (ratchet at 82%; measured 85% on 2026-10-23)
+        working-directory: kisan-bazar-api
+        run: |
+          for t in test_api test_auth test_land_scan test_assistant test_security_fixes test_perf_fixes test_regressions_oct23 test_aplus; do
+            coverage run --append --source=. --omit='tests/*,seed.py' tests/$t.py
+          done
+          coverage report --fail-under=82
+
+      - name: SMS suite
+        run: python3 kisan-bazar-sms/tests/test_flows.py
+
+      - name: JS syntax checks
+        run: |
+          node -e "const fs=require('fs');const m=fs.readFileSync('kisan-bazar.html','utf8').match(/<script>([\s\S]*)<\/script>/);new Function(m[1]);console.log('app inline script parses')"
+          for f in website/*.js; do node --check "$f"; done
+
+      - name: JS suites
+        working-directory: kisan-bazar-jstests
+        run: |
+          npm install --no-audit --no-fund
+          node test_app.js
+          node test_assistant.js
+          node test_views_aplus.js
+          node test_integration.js
+
+      - name: Accessibility + contrast + bilingual audit
+        working-directory: kisan-bazar-jstests
+        run: node audit_a11y.js
