@@ -95,8 +95,8 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
         loginHtml.includes('window.location.href = "account.html"'));
   check("account.html has a website Log out button",
         accountHtml.includes('id="web-logout"') && accountHtml.includes("doWebLogout()"));
-  check("account.html keeps the explicit Open app entry",
-        accountHtml.includes('href="/"') && accountHtml.includes("Open app"));
+  check("account.html keeps the explicit Open app entry (at /app, the app's own address)",
+        accountHtml.includes('href="/app"') && accountHtml.includes("Open app"));
 
   console.log("\n=== website chrome: Login becomes Account with a session ===");
   {

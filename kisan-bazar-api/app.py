@@ -40,7 +40,7 @@ Endpoints:
 """
 import os
 import re
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, redirect
 import db
 
 app = Flask(__name__)
@@ -153,7 +153,17 @@ def health():
 
 
 @app.get("/")
-def serve_index():
+def serve_root():
+    # The main address is the WEBSITE's front door — Samir's standing
+    # requirement is that website login and app login are separate
+    # doors, so the bare domain must not drop visitors straight into
+    # the app. The public website owns "/"; the app lives at /app.
+    return redirect("/site/", code=302)
+
+
+@app.get("/app")
+@app.get("/app/")
+def serve_app():
     html_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kisan-bazar.html")
     if os.path.exists(html_path):
         return send_file(html_path)
@@ -161,7 +171,7 @@ def serve_index():
 
 
 # ---------------- public website ----------------
-# Static marketing site served under /site/. The app itself stays at /.
+# Static marketing site served under /site/. The app lives at /app.
 
 @app.get("/site/")
 @app.get("/site/<path:filename>")

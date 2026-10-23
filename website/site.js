@@ -171,7 +171,7 @@ async function loadMarketLots(box){
     box.innerHTML = ready.length ? ready.map(lotCard).join("")
       : `<div class="empty">
           <p>${LANG==="ne"?"अहिले कुनै लट छैन। सहकारीले नयाँ लट बनाउँदा यहाँ देखिन्छ।":"No lots right now. New lots appear here as co-ops form them."}</p>
-          <a href="/" class="btn-primary" data-ne="एपमा हेर्नुहोस्" data-en="Check the app">${LANG==="ne"?"एपमा हेर्नुहोस्":"Check the app"}</a>
+          <a href="/app" class="btn-primary" data-ne="एपमा हेर्नुहोस्" data-en="Check the app">${LANG==="ne"?"एपमा हेर्नुहोस्":"Check the app"}</a>
         </div>`;
   }catch(e){
     box.innerHTML = `<p class="muted">${LANG==="ne"?"लोड हुन सकेन।":"Could not load."}</p>`;

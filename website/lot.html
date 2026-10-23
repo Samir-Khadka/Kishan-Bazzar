@@ -21,7 +21,7 @@
     </nav>
     <div class="header-cta">
       <button class="lang-toggle" onclick="toggleLang()">ने / EN</button>
-      <a href="/" class="btn-primary" data-ne="एप खोल्नुहोस्" data-en="Open app">एप खोल्नुहोस्</a>
+      <a href="/app" class="btn-primary" data-ne="एप खोल्नुहोस्" data-en="Open app">एप खोल्नुहोस्</a>
     </div>
     <button class="menu-btn" onclick="document.querySelector('.main-nav').classList.toggle('open')" aria-expanded="false" aria-controls="main-nav" aria-label="मेनु" data-aria-ne="मेनु" data-aria-en="Menu">☰</button>
   </div>
@@ -72,7 +72,7 @@ function renderLotDetail(){
         <h1 style="font-size:32px; color:var(--paddy-deep)">${name}</h1>
         <p class="muted">${l.pooled_kg} kg ${ne?"उपलब्ध":"available"} · ${ne?"ग्रेड":"Grade"} ${l.grade||"A"}</p>
         <p style="font-size:28px; font-weight:800; color:var(--paddy-deep); margin:12px 0">रू ${l.rate_per_kg||"—"} <small style="font-size:15px; font-weight:600; color:var(--ink-2)">${ne?"प्रति के.जी.":"per kg"}</small></p>
-        <a class="btn-primary big" href="/">${ne?"एपमा मोलतोल / अर्डर गर्नुहोस्":"Negotiate / order in the app"}</a>
+        <a class="btn-primary big" href="/app">${ne?"एपमा मोलतोल / अर्डर गर्नुहोस्":"Negotiate / order in the app"}</a>
       </div>
     </div>
     <div class="prose" style="padding-left:0">

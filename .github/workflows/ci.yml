@@ -30,7 +30,7 @@ jobs:
       - name: Python suites with coverage gate (ratchet at 82%; measured 85% on 2026-10-23)
         working-directory: kisan-bazar-api
         run: |
-          for t in test_api test_auth test_land_scan test_assistant test_security_fixes test_perf_fixes test_regressions_oct23 test_aplus test_session_persistence; do
+          for t in test_api test_auth test_land_scan test_assistant test_security_fixes test_perf_fixes test_regressions_oct23 test_aplus test_session_persistence test_root_routing; do
             coverage run --append --source=. --omit='tests/*,seed.py' tests/$t.py
           done
           coverage report --fail-under=82
