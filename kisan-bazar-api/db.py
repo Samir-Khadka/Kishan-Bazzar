@@ -208,6 +208,18 @@ CREATE TABLE IF NOT EXISTS auth_codes (
     consumed_at     TEXT
 );
 CREATE INDEX IF NOT EXISTS auth_codes_phone_idx ON auth_codes (phone, created_at DESC);
+
+-- Generic key/value store for app-level state that must survive
+-- restarts. Currently holds ONE row: the token signing secret
+-- (key='signing_secret'), written by auth.py on first use when
+-- KISAN_BAZAR_SECRET is not set in the environment. Persisting it
+-- here — instead of generating a random secret per process — is what
+-- keeps every worker on the same secret and keeps logins valid
+-- across restarts/redeploys on the same database.
+CREATE TABLE IF NOT EXISTS app_settings (
+    key             TEXT PRIMARY KEY,
+    value           TEXT NOT NULL
+);
 """
 
 

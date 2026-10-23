@@ -86,6 +86,7 @@ const EXPORT_LIST = [
   "CROP_API_CODE","BACKEND","account","apiRequestCode","apiVerifyCode","apiCreateListing",
   "apiSaveLandScan","apiGetLandScan",
   "doRequestCode","doVerifyCode","handlePostBtn","renderAccountPanel",
+  "fetchAdminOverview","checkSession","onSessionExpired","doLogout","SessionExpiredError","adminPanelBar",
   "isStale","refreshOnce","renderPriceTrends","viewRental","viewMyOffers","viewAdminOffers",
   "viewAdminOrders","doSettleOrder","fetchCoopRoute","renderRealRoute",
   "viewAdminOverview","viewAdminFarmers","viewAdminLots","viewAdminRates",

@@ -177,6 +177,12 @@ async function main() {
     A.account.token = "not.a.real.token";
     const offBadTok = await listViaApp("potato", 10, "B");
     check("server rejects a bad token (401) -> offer kept locally, flagged synced:false", offBadTok.synced === false);
+    // New contract (2026-10-23 session fix): a 401 means the session is
+    // DEAD — the app clears it and routes to login instead of silently
+    // retrying a token that can never work again.
+    check("bad token (401) clears the stored session — login is required again",
+          A.account.token === null && /Session expired|सेसन सकियो/.test(A.account.lastError || ""),
+          `token=${A.account.token} err=${A.account.lastError}`);
     A.account.token = realToken;
     const offOk = await listViaApp("potato", 10, "B");
     check("restored token works again", offOk.synced === true);

@@ -37,22 +37,113 @@ import os
 CODE_TTL_SECONDS = 5 * 60        # a request-code is valid for 5 minutes
 TOKEN_TTL_SECONDS = 24 * 60 * 60  # a login session lasts 24 hours
 
-# The signing secret. Read from the environment in any real deployment —
-# never hardcode a secret in source, since source is exactly what an
-# attacker reading this code already has. If unset, generate a random
-# one for the life of this process: tokens then simply stop working on
-# restart, which is safe (if inconvenient for dev) — a hardcoded fallback
-# secret would be the opposite: falsely convenient and actually dangerous,
-# since "the fallback secret in the code everyone can read" is not a
-# secret at all.
-_SECRET = os.environ.get("KISAN_BAZAR_SECRET")
-if not _SECRET:
-    _SECRET = secrets.token_hex(32)
-    print("WARNING: KISAN_BAZAR_SECRET not set — using a random secret for "
-          "this process only. Tokens will stop working on restart, and "
-          "multiple server instances will not accept each other's tokens. "
-          "Set KISAN_BAZAR_SECRET in any real deployment.")
-_SECRET_BYTES = _SECRET.encode("utf-8")
+# ---------------- the signing secret ----------------
+# Resolved lazily on first use (not at import: the database may not
+# exist yet when this module is first imported), then cached for the
+# life of the process. Priority order:
+#
+#   1. KISAN_BAZAR_SECRET from the environment — explicit deployment
+#      configuration always wins.
+#   2. A secret PERSISTED IN THE DATABASE (app_settings table). It is
+#      created atomically on first use (see _load_or_create_db_secret),
+#      so every process/worker sharing the database converges on ONE
+#      value, and — critically — it survives restarts and redeploys.
+#   3. An ephemeral random secret, only if the database is unreachable
+#      when first needed. Safe, but tokens die with the process.
+#
+# History (2026-10-23): this used to be option 1-or-3 only, generated
+# at import time. On any deployment where the env var isn't actually
+# present (a blueprint declaring it is not the same as the running
+# service having it), EVERY restart/redeploy — and with multiple
+# workers, potentially every request — invalidated all sessions, and
+# OTP code hashes too (they're keyed with the same secret). Users hit
+# a raw "server 401" with no recovery. Option 2 removes that failure
+# mode without hardcoding anything: the persisted value is random,
+# generated on the server, and never appears in source.
+_SECRET_BYTES = None
+
+
+def _load_or_create_db_secret():
+    """Read the signing secret from app_settings, creating it if absent.
+
+    BEGIN IMMEDIATE takes the database write lock BEFORE the read, so
+    two workers booting simultaneously cannot both create a secret:
+    the second blocks on the lock (busy_timeout in db.get_db), then
+    reads the row the first one committed. INSERT OR IGNORE + re-read
+    under the same lock is belt-and-suspenders for the same guarantee.
+    Returns the secret string, or None if the DB is unreachable."""
+    try:
+        import db as _db  # local import: keeps auth importable standalone
+    except Exception:
+        return None
+    import sqlite3 as _sqlite3
+    import time as _time
+    for _attempt in range(3):
+        conn = None
+        try:
+            conn = _db.get_db()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS app_settings "
+                    "(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                row = conn.execute(
+                    "SELECT value FROM app_settings WHERE key='signing_secret'"
+                ).fetchone()
+                if row is not None:
+                    value = row[0]
+                else:
+                    value = secrets.token_hex(32)
+                    conn.execute(
+                        "INSERT OR IGNORE INTO app_settings (key, value) "
+                        "VALUES ('signing_secret', ?)",
+                        (value,),
+                    )
+                    # Re-read: the stored row is the single source of
+                    # truth even if a race somehow inserted first.
+                    row = conn.execute(
+                        "SELECT value FROM app_settings WHERE key='signing_secret'"
+                    ).fetchone()
+                    value = row[0]
+                conn.commit()
+                return value
+            except Exception:
+                conn.rollback()
+                raise
+        except _sqlite3.OperationalError:
+            # Lock contention beyond busy_timeout — brief backoff, retry.
+            _time.sleep(0.2 * (_attempt + 1))
+        except Exception:
+            return None
+        finally:
+            if conn is not None:
+                conn.close()
+    return None
+
+
+def _secret_bytes():
+    """The HMAC key for code hashes and token signatures. Cached after
+    first resolution; a process restart re-resolves to the SAME value
+    whenever the env var or the database persists — which is the whole
+    point (see the history note above)."""
+    global _SECRET_BYTES
+    if _SECRET_BYTES is not None:
+        return _SECRET_BYTES
+    env_secret = os.environ.get("KISAN_BAZAR_SECRET")
+    if env_secret:
+        _SECRET_BYTES = env_secret.encode("utf-8")
+        return _SECRET_BYTES
+    persisted = _load_or_create_db_secret()
+    if persisted:
+        _SECRET_BYTES = persisted.encode("utf-8")
+        return _SECRET_BYTES
+    _SECRET_BYTES = secrets.token_hex(32).encode("utf-8")
+    print("WARNING: KISAN_BAZAR_SECRET not set and the database is "
+          "unreachable — using a random secret for this process only. "
+          "Tokens will stop working on restart. Set KISAN_BAZAR_SECRET "
+          "or make the database available in any real deployment.")
+    return _SECRET_BYTES
 
 # Test-visible "outbox" standing in for the real SMS gateway — tests import
 # this module directly and read it, the same way a real integration test
@@ -102,7 +193,7 @@ def check_rate_limit(key: str, max_attempts: int, window_seconds: int) -> bool:
 def _hash_code(phone: str, code: str) -> str:
     # phone is mixed into the hash so a leaked hash for one phone can't be
     # replayed against a different phone even if the code digits collide
-    return hmac.new(_SECRET_BYTES, f"{phone}:{code}".encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.new(_secret_bytes(), f"{phone}:{code}".encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def create_auth_code(conn, phone: str) -> str:
@@ -151,7 +242,7 @@ def verify_code(conn, phone: str, code: str) -> bool:
 def issue_token(phone: str) -> str:
     payload = {"phone": phone, "exp": int(time.time()) + TOKEN_TTL_SECONDS}
     payload_b64 = _b64(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    sig = hmac.new(_SECRET_BYTES, payload_b64.encode("ascii"), hashlib.sha256).hexdigest()
+    sig = hmac.new(_secret_bytes(), payload_b64.encode("ascii"), hashlib.sha256).hexdigest()
     return f"{payload_b64}.{sig}"
 
 
@@ -161,7 +252,7 @@ def verify_token(token: str):
     if not token or "." not in token:
         return None
     payload_b64, sig = token.rsplit(".", 1)
-    expected_sig = hmac.new(_SECRET_BYTES, payload_b64.encode("ascii"), hashlib.sha256).hexdigest()
+    expected_sig = hmac.new(_secret_bytes(), payload_b64.encode("ascii"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected_sig, sig):
         return None
     try:

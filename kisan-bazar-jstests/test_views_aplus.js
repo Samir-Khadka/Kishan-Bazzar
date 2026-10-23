@@ -104,6 +104,56 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
         && posted.body.reference === "KH-77" && posted.auth === "Bearer t",
         JSON.stringify(posted));
 
+  console.log("\n=== session expiry: 401 routes to login (no dead-end Retry); admin logout reachable ===");
+  // `account` is REASSIGNED by the expiry/logout flows, so the
+  // load-time A.account snapshot goes stale — read/write live state
+  // through evalInApp from here on.
+  const live = () => evalInApp("account");
+  const setStaff = () => evalInApp(`account = {phone:"9801100000", name:"Admin", role:"staff",
+    isStaff:true, token:"dead-token", loginStep:"idle", regRole:"farmer", codeDraft:"", busy:false, lastError:null}`);
+
+  // — a 401 from the admin overview (the live bug: dead token, admin
+  // panel showing "server 401" + Retry forever) —
+  setStaff();
+  evalInApp("S.role='admin'; S.tab='admin_overview'; adminCache={data:null, at:0, err:null}");
+  sandbox.fetch = async () => ({ ok: false, status: 401, json: async () => ({ error: "invalid or expired token" }) });
+  let expiryErr = null;
+  try { await A.fetchAdminOverview(); } catch (e) { expiryErr = e; }
+  check("overview 401 throws a session-expired error", !!expiryErr && expiryErr.sessionExpired === true, String(expiryErr));
+  check("401 clears the stored session (token + staff flag)", live().token === null && live().isStaff === false);
+  check("401 routes to the login screen with the bilingual notice",
+        evalInApp("S.role") === "farmer" && evalInApp("S.tab") === "mine"
+        && (live().lastError || "").includes("Session expired") && live().showAuth === true,
+        `tab=${evalInApp("S.tab")} err=${live().lastError}`);
+  check("401 leaves NO dead-end admin error state behind", evalInApp("adminCache.err") === null);
+  check("after expiry the admin view is the login guard, not a Retry card",
+        A.viewAdminOverview().includes("gotoLoginBtn") && !A.viewAdminOverview().includes("adminRetryBtn"));
+
+  // — a transient 500 must NOT log anyone out: session + Retry stay —
+  setStaff();
+  evalInApp("adminCache={data:null, at:0, err:null}");
+  sandbox.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+  let err500 = null;
+  try { await A.fetchAdminOverview(); } catch (e) { err500 = e; }
+  check("overview 500 still throws 'server 500' (Retry territory)",
+        !!err500 && String(err500.message).includes("server 500"), String(err500));
+  check("500 does NOT clear the session", live().token === "dead-token" && live().isStaff === true);
+
+  // — logout is rendered inside the admin panel itself —
+  setStaff();
+  evalInApp(`adminCache = {data: {farmers: [], listings: [], lots: [], crops: [], orders: [],
+    counts: {farmers: 0, listings: 0, lots: 0, orders: 0, total_kg: 0, pooled_kg: 0}}, at: Date.now(), err: null}`);
+  check("admin overview renders a logout button", A.viewAdminOverview().includes('id="adminLogoutBtn"'));
+  check("admin orders renders a logout button", A.viewAdminOrders().includes('id="adminLogoutBtn"'));
+  check("admin farmers renders a logout button", A.viewAdminFarmers().includes('id="adminLogoutBtn"'));
+
+  // — doLogout clears everything and lands back home —
+  A.doLogout();
+  check("logout clears token/staff and returns to farmer home",
+        live().token === null && live().isStaff === false
+        && evalInApp("S.role") === "farmer" && evalInApp("S.tab") === "today");
+  check("logout clears the admin cache", evalInApp("adminCache.data") === null);
+
   A.BACKEND.enabled = false;
   console.log(`\n${passed} passed, ${failed} failed.`);
   process.exit(failed ? 1 : 0);

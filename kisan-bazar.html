@@ -568,6 +568,7 @@ async function apiRegister(phone, name, role){
     headers: {"Content-Type":"application/json", "Authorization": `Bearer ${account.token}`},
     body: JSON.stringify({phone, name, role})
   });
+  if(checkSession(res)) throw new SessionExpiredError();
   const data = await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || `register failed (${res.status})`);
   return data;
@@ -581,6 +582,7 @@ async function apiCreateListing(token, payload){
     headers: {"Content-Type":"application/json", "Authorization": `Bearer ${token}`, "Idempotency-Key": crypto.randomUUID()},
     body: JSON.stringify(payload)
   });
+  if(checkSession(res)) throw new SessionExpiredError();
   const data = await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || `listing failed (${res.status})`);
   return data;
@@ -590,13 +592,15 @@ async function apiSaveLandScan(token, phone, payload){
   // Sends the derived signals from the scan (land_type, confidence,
   // color_key, texture, drainage, had_photo) — never the raw photo.
   // The API stores them, updates the farmer's record, and returns the
-  // saved row. A 401 here means the token expired; caller handles that
-  // the same as a network error: fall through to local-only.
+  // saved row. A 401 here means the token expired: checkSession clears
+  // the dead session and routes to login, and the caller still falls
+  // through to local-only so the scan itself is never lost.
   const res = await fetch(`${BACKEND.baseUrl}/v1/farmers/${encodeURIComponent(phone)}/land-scan`, {
     method: "POST",
     headers: {"Content-Type":"application/json", "Authorization": `Bearer ${token}`},
     body: JSON.stringify(payload)
   });
+  if(checkSession(res)) throw new SessionExpiredError();
   const data = await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || `land-scan save failed (${res.status})`);
   return data;
@@ -610,6 +614,7 @@ async function apiGetLandScan(token, phone){
   const res = await fetch(`${BACKEND.baseUrl}/v1/farmers/${encodeURIComponent(phone)}/land-scan`, {
     headers: {"Authorization": `Bearer ${token}`}
   });
+  if(checkSession(res)) throw new SessionExpiredError();
   if(res.status === 404) return null;
   const data = await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.error || `land-scan fetch failed (${res.status})`);
@@ -622,6 +627,67 @@ function saveAccount(){
   store.set("accountRole", account.role);
   store.set("accountToken", account.token);
   store.set("accountIsStaff", account.isStaff);
+}
+
+/* ---------------- session expiry + logout ----------------
+   A 401 on any authenticated call means the stored token is dead —
+   expired, or (before the 2026-10-23 server fix) invalidated by a
+   server restart changing the signing secret. The old behavior
+   surfaced that as a raw "server 401" card whose Retry could never
+   succeed. Now the session is cleared centrally and the user lands
+   on the login screen with a clear notice. Genuine transient
+   failures (network errors, 5xx) never come through here — they
+   keep their existing Retry / local-fallback behavior. */
+const SESSION_EXPIRED_NE = "सेसन सकियो — फेरि लगइन गर्नुहोस्";
+const SESSION_EXPIRED_EN = "Session expired — please log in again";
+
+class SessionExpiredError extends Error {
+  constructor(){
+    super(T(SESSION_EXPIRED_NE, SESSION_EXPIRED_EN));
+    this.sessionExpired = true;
+  }
+}
+
+function clearSessionState(){
+  // Mutate in place rather than reassigning: `account` is the app's
+  // single session object and everything (including the test harness)
+  // holds it by reference.
+  Object.assign(account, {phone:"", name:"", role:"farmer", isStaff:false, token:null,
+             loginStep:"idle", regRole:"farmer", codeDraft:"", busy:false, lastError:null,
+             showAuth:false});
+  saveAccount();
+  adminCache = {data:null, at:0, err:null};
+  adminOffersCache = {data:null, at:0};
+  myOffersCache = {data:null, at:0};
+  routeCache = {data:null, at:0, err:null};
+}
+
+function doLogout(){
+  clearSessionState();
+  S.role = "farmer"; S.tab = "today";
+  render({skipScroll:true});
+  toast(T("लगआउट भयो","Logged out"));
+}
+
+// The stored session is dead: drop it, keep the phone number so the
+// login form is pre-filled, and put the login screen in front of the
+// user with the reason — never a dead-end error card.
+function onSessionExpired(){
+  const phone = account.phone || "";
+  clearSessionState();
+  account.phone = phone; account.loginStep = "phone"; account.showAuth = true;
+  account.lastError = T(SESSION_EXPIRED_NE, SESSION_EXPIRED_EN);
+  saveAccount();
+  S.role = "farmer"; S.tab = "mine";
+  render({skipScroll:true});
+}
+
+// Call right after an authenticated fetch. Returns true when the
+// response was a 401 and the session-expired flow has taken over —
+// the caller should then bail out by throwing SessionExpiredError.
+function checkSession(res){
+  if(res && res.status === 401 && account.token){ onSessionExpired(); return true; }
+  return false;
 }
 
 async function doRequestCode(phone){
@@ -671,6 +737,7 @@ async function doVerifyCode(code){
              : account.role === "staff" ? "admin" : "farmer";
       S.tab = TABS[S.role][0][0];
     }catch(e){
+      if(e.sessionExpired){ account.busy = false; return; }  // already routed to login
       if(e.message && e.message.includes("404")){
         account.loginStep = "register";
         account.busy = false; saveAccount(); render({skipScroll:true});
@@ -691,7 +758,7 @@ async function doVerifyCode(code){
       }
     }catch(_e){}
   }catch(err){
-    account.lastError = err.message || T("प्रमाणित गर्न सकिएन","Could not verify");
+    if(!err.sessionExpired) account.lastError = err.message || T("प्रमाणित गर्न सकिएन","Could not verify");
   }
   account.busy = false; render({skipScroll:true});
 }
@@ -700,6 +767,7 @@ async function apiGetMe(token){
   const res = await fetch(`${BACKEND.baseUrl}/v1/me`, {
     headers: {"Authorization": `Bearer ${token}`}
   });
+  if(checkSession(res)) throw new SessionExpiredError();
   if(res.status === 404) throw new Error("404 no profile");
   if(!res.ok) throw new Error(`server ${res.status}`);
   return res.json();
@@ -722,6 +790,7 @@ async function doRegister(){
       body: JSON.stringify({phone: account.phone, name: name.trim(), role,
                             land_type: land, payout_method: payout})
     });
+    if(checkSession(res)) throw new SessionExpiredError();
     const data = await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.error || `server ${res.status}`);
     account.name = name.trim(); account.role = role; account.loginStep = "idle";
@@ -1510,6 +1579,7 @@ async function sendChatMessage(text){
         method:"POST", headers,
         body: JSON.stringify({message:text, session_id:chat.sessionId})
       });
+      if(checkSession(res)) throw new Error("session expired");  // expiry flow routed to login; local reply still answers
       if(res.ok){
         const d = await res.json();
         reply = { text:d.reply, chips:d.chips, cards:d.cards };
@@ -1661,6 +1731,7 @@ async function doAuthVerifyCode(){
       S.role = account.role === "buyer" ? "buyer" : account.role === "staff" ? "admin" : "farmer";
       S.tab = TABS[S.role][0][0];
     }catch(e){}
+    if(!account.token){ account.busy = false; render({skipScroll:true}); return; }  // session died mid-login (401 on /v1/me) — expiry flow already routed to login
     saveAccount(); render();
     toast(T("स्वागत छ!","Welcome!"));
   }catch(e){
@@ -1881,6 +1952,7 @@ async function doDiagnose(){
       body: JSON.stringify({crop_code: doctor.crop, symptoms: symptoms || "(फोटो मात्र)",
                             photo_ref: doctor.photoRef})
     });
+    if(checkSession(res)) throw new SessionExpiredError();
     const data = await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.error || res.status);
     doctor.result = data;
@@ -2115,6 +2187,7 @@ async function doBookRental(rentalId){
       method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${account.token}`},
       body: JSON.stringify({days:n, book_date:date})
     });
+    if(checkSession(res)) throw new SessionExpiredError();
     const data = await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.error || res.status);
     toast(`${T("बुकिङ भयो!","Booked!")} ${T("जम्मा","Total")}: ${money(data.total)}`);
@@ -2331,6 +2404,7 @@ async function doSubmitOffer(){
       })
     });
     const data = await res.json().catch(()=>({}));
+    if(checkSession(res)) throw new SessionExpiredError();
     if(!res.ok) throw new Error(data.error || res.status);
     S.offerDialog = null;
     toast(T("अफर पठाइयो! सहकारीको जवाफ पर्खनुहोस्","Offer sent! Waiting for co-op response"));
@@ -2384,7 +2458,9 @@ async function doPlaceOrder(){
           quantity_kg: qty
         })
       });
-      if(res.ok){ ok++; succeeded.push(lotId); } else failed++;
+      if(res.ok){ ok++; succeeded.push(lotId); }
+      else if(checkSession(res)){ failed++; break; }  // session died mid-checkout — expiry flow has routed to login; stop sending a dead token
+      else failed++;
     }catch(e){ failed++; }
   }
   _ordering = false;  // release the guard
@@ -2440,6 +2516,7 @@ async function fetchMyOffers(){
     const headers = {};
     if(account.token) headers["Authorization"] = "Bearer " + account.token;
     const res = await fetch(`${BACKEND.baseUrl}/v1/offers?buyer_phone=${encodeURIComponent(account.phone)}`, {headers});
+    if(checkSession(res)) return [];
     if(!res.ok) throw new Error(res.status);
     myOffersCache = {data: await res.json(), at: now};
     return myOffersCache.data;
@@ -2592,10 +2669,12 @@ async function fetchCoopRoute(){
     const res = await fetch(`${BACKEND.baseUrl}/v1/coop/route`, {
       headers: {"Authorization": `Bearer ${account.token}`}
     });
+    if(checkSession(res)) throw new SessionExpiredError();
     if(!res.ok) throw new Error(res.status === 403 ? T("स्टाफ पहुँच आवश्यक छ","Staff access required") : `server ${res.status}`);
     routeCache = {data: await res.json(), at: Date.now(), err: null};
     return routeCache.data;
   }catch(e){
+    if(e && e.sessionExpired) return null;  // expiry flow already routed to login + rendered
     routeCache = {data: null, at: 0, err: e.message || "fetch failed"};
     // refreshOnce won't re-render on a null result; surface the error
     // state directly (same reason adminLoadState chains its own catch).
@@ -2757,6 +2836,20 @@ function viewBoard(){
 }
 
 /* ---------------- ADMIN (co-op staff) ---------------- */
+// Shared header strip for every admin view: who you're signed in as,
+// plus the logout control. It lives inside the admin panel itself
+// because the only other logout button sits in the Mine tab's account
+// panel — and the admin bottom-nav (Dashboard/Farmers/Lots/Offers/
+// Orders/Rates) has no Mine tab, which left a signed-in admin with
+// NO reachable logout at all (reported live, 2026-10-23).
+function adminPanelBar(){
+  return `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px">
+    <div><b>🛡️ ${esc(T("प्रशासक प्यानल","Admin panel"))}</b>
+      <div style="font-size:13px;color:var(--ink-2)">${esc(account.name || "")}${account.name && account.phone ? " · " : ""}${esc(account.phone || "")}</div></div>
+    <button class="btn ghost" id="adminLogoutBtn" style="flex:0 0 auto">${esc(T("लगआउट","Log out"))}</button>
+  </div>`;
+}
+
 let adminCache = {data:null, at:0};
 
 async function fetchAdminOverview(){
@@ -2765,6 +2858,7 @@ async function fetchAdminOverview(){
   const res = await fetch(`${BACKEND.baseUrl}/v1/admin/overview`, {
     headers: {"Authorization": `Bearer ${account.token}`}
   });
+  if(checkSession(res)) throw new SessionExpiredError();
   if(!res.ok) throw new Error(res.status === 403 ? T("स्टाफ पहुँच आवश्यक छ","Staff access required") : `server ${res.status}`);
   adminCache = {data: await res.json(), at: Date.now()};
   return adminCache.data;
@@ -2798,7 +2892,7 @@ function adminLoadState(){
   }
   if(!adminCache.data){
     fetchAdminOverview().then(()=>{ adminCache.err=null; render({skipScroll:true}); })
-      .catch(e=>{ adminCache.err = e.message; render({skipScroll:true}); });
+      .catch(e=>{ if(e && e.sessionExpired) return; adminCache.err = e.message; render({skipScroll:true}); });
     return {state:"loading", html:`<div class="stack"><div class="card"><p>${esc(T("लोड हुँदैछ...","Loading..."))}</p></div></div>`};
   }
   return {state:"ready", data:adminCache.data};
@@ -2812,6 +2906,7 @@ function viewAdminOverview(){
   const d = s.data;
   const c = d.counts || {};
   return `<div class="stack">
+    ${adminPanelBar()}
     <div class="kpi">
       <div><b>${esc(T("किसान","Farmers"))}</b><i>${esc(N(c.farmers||0))}</i></div>
       <div><b>${esc(T("लटहरू","Lots"))}</b><i>${esc(N(c.lots||0))}</i></div>
@@ -2840,6 +2935,7 @@ function viewAdminLots(){
   const forming = (d.lots||[]).filter(l=>l.status==="forming");
   const rest = (d.lots||[]).filter(l=>l.status!=="forming");
   return `<div class="stack">
+    ${adminPanelBar()}
     <h2 class="sec">${esc(T("पुष्टि गर्न बाँकी","Awaiting confirmation"))} (${forming.length})</h2>
     ${forming.map(l=>`<div class="card" style="margin-bottom:10px;border-left:7px solid var(--tori)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -2867,7 +2963,7 @@ function viewAdminFarmers(){
   const _s = adminLoadState();
   if(_s.state !== "ready") return _s.html;
   const d = _s.data;
-  return `<div class="stack"><h2 class="sec">${esc(T("किसानहरू","Farmers"))} (${(d.farmers||[]).length})</h2>
+  return `<div class="stack">${adminPanelBar()}<h2 class="sec">${esc(T("किसानहरू","Farmers"))} (${(d.farmers||[]).length})</h2>
     <div class="card" style="overflow-x:auto"><table class="adminTable">
       <tr><th>${esc(T("नाम","Name"))}</th><th>${esc(T("फोन","Phone"))}</th><th>${esc(T("भुक्तानी","Payout"))}</th></tr>
       ${(d.farmers||[]).map(f=>`<tr><td>${esc(f.name)}${f.is_staff?' 🛡️':''}</td><td>${esc(f.phone)}</td><td>${esc(f.payout_method||"-")}</td></tr>`).join("")}
@@ -2883,6 +2979,7 @@ async function fetchAdminOffers(){
     // Staff token required — the backend only shows all offers to staff.
     const res = await fetch(`${BACKEND.baseUrl}/v1/offers`, {
       headers: {"Authorization": "Bearer " + account.token}});
+    if(checkSession(res)) throw new SessionExpiredError();
     if(!res.ok) throw new Error(res.status);
     adminOffersCache = {data: await res.json(), at: now};
     return adminOffersCache.data;
@@ -2912,6 +3009,7 @@ function viewAdminOffers(){
       </div>
     </div>`;
   return `<div class="stack">
+    ${adminPanelBar()}
     <h2 class="sec">${esc(T("आएका अफरहरू","Incoming offers"))} (${offers.length})</h2>
     ${offers.length ? offers.map(row).join("") : `<div class="card"><p>${esc(T("कुनै नयाँ अफर छैन।","No new offers."))}</p></div>`}
     ${done.length ? `<h2 class="sec">${esc(T("फैसला भएका","Decided"))}</h2>${done.slice(0,10).map(o=>
@@ -2930,6 +3028,7 @@ async function decideOffer(offerId, decision, counterRate){
       body: JSON.stringify(body)
     });
     const data = await res.json().catch(()=>({}));
+    if(checkSession(res)) throw new SessionExpiredError();
     if(!res.ok) throw new Error(data.error || res.status);
     adminOffersCache = {data:null, at:0};
     toast(T("फैसला गरियो","Decided"));
@@ -2973,6 +3072,7 @@ function viewAdminOrders(){
     </div>`;
   };
   return `<div class="stack">
+    ${adminPanelBar()}
     <h2 class="sec">${esc(T("भुक्तानी बाँकी अर्डर","Unpaid orders"))} (${unpaid.length})</h2>
     ${unpaid.length ? unpaid.map(row).join("") : `<div class="card"><p>${esc(T("सबै अर्डर चुक्ता छन्।","All orders are settled."))}</p></div>`}
     ${settled.length ? `<h2 class="sec">${esc(T("चुक्ता भएका","Settled"))} (${settled.length})</h2>${settled.slice(0,10).map(row).join("")}` : ""}
@@ -2993,6 +3093,7 @@ async function doSettleOrder(orderId){
       body: JSON.stringify(body)
     });
     const data = await res.json().catch(()=>({}));
+    if(checkSession(res)) throw new SessionExpiredError();
     if(!res.ok) throw new Error(data.error || res.status);
     adminCache = {data:null, at:0}; // overview carries the new status
     toast(T("चुक्ता भयो","Settled"));
@@ -3006,7 +3107,7 @@ function viewAdminRates(){
   const _s = adminLoadState();
   if(_s.state !== "ready") return _s.html;
   const d = _s.data;
-  return `<div class="stack"><h2 class="sec">${esc(T("बाली भाउ","Crop rates"))}</h2>
+  return `<div class="stack">${adminPanelBar()}<h2 class="sec">${esc(T("बाली भाउ","Crop rates"))}</h2>
     <div class="card" style="overflow-x:auto"><table class="adminTable">
       <tr><th>${esc(T("बाली","Crop"))}</th><th>${esc(T("कोड","Code"))}</th></tr>
       ${(d.crops||[]).map(c=>`<tr><td>${esc(T(c.name_ne, c.name_en))}</td><td>${esc(c.code)}</td></tr>`).join("")}
@@ -3024,6 +3125,7 @@ async function doConfirmLot(lotId){
       body: JSON.stringify({rate_per_kg: rate})
     });
     const data = await res.json().catch(()=>({}));
+    if(checkSession(res)) throw new SessionExpiredError();
     if(!res.ok) throw new Error(data.error || `server ${res.status}`);
     adminCache = {data:null, at:0}; // invalidate
     toast(T("लट पुष्टि भयो","Lot confirmed"));
@@ -3111,14 +3213,7 @@ document.addEventListener("click", e=>{
   if(t.id==="registerBtn" && !account.busy){ doRegister(); return; }
   if(t.id==="regRoleFarmer"){ account.regRole = "farmer"; render({skipScroll:true}); return; }
   if(t.id==="regRoleBuyer"){ account.regRole = "buyer"; render({skipScroll:true}); return; }
-  if(t.id==="logoutBtn"){
-    account = {phone:"", name:"", role:"farmer", isStaff:false, token:null,
-               loginStep:"idle", regRole:"farmer", codeDraft:"", busy:false, lastError:null};
-    saveAccount();
-    S.role = "farmer"; S.tab = "today";
-    render({skipScroll:true});
-    toast(T("लगआउट भयो","Logged out")); return;
-  }
+  if(t.id==="logoutBtn" || t.id==="adminLogoutBtn"){ doLogout(); return; }
   if(t.id==="toggleBackendBtn"){
     BACKEND.enabled = !BACKEND.enabled;
     store.set("backendEnabled", BACKEND.enabled);
