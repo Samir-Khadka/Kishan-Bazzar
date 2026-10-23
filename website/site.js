@@ -2,6 +2,65 @@
 const API = "";  // same origin — API lives at /v1/* alongside /site/*
 let LANG = localStorage.getItem("kb-lang") || "ne";
 
+/* ---------------- website session (shared account, separate flow) ----
+   The website and the app use the SAME account and bearer token
+   (stored under the app's kb:account* keys, same origin) — but they
+   are separate login FLOWS: signing in on the website stays on the
+   website (account.html), and the app is entered only via the
+   explicit "Open app" button. Logging out on the website clears the
+   shared session keys and returns to the website home. */
+function webToken(){
+  try{
+    const raw = localStorage.getItem("kb:accountToken");
+    if(!raw) return null;
+    try{ return JSON.parse(raw); }catch(_e){ return raw; }
+  }catch(_e){ return null; }
+}
+function webPhone(){
+  try{
+    const raw = localStorage.getItem("kb:accountPhone");
+    if(!raw) return "";
+    try{ return JSON.parse(raw) || ""; }catch(_e){ return raw; }
+  }catch(_e){ return ""; }
+}
+function clearWebSession(){
+  ["accountToken","accountPhone","accountName","accountRole","accountIsStaff"]
+    .forEach(k=>{ try{ localStorage.removeItem("kb:"+k); }catch(_e){} });
+}
+/* Header/footer chrome reflects session state: every Login entry
+   point (href login.html / account.html) becomes "Account" while a
+   session exists, and reverts to "Login" once it is gone. */
+function updateAuthNav(){
+  const logged = !!webToken();
+  document.querySelectorAll('a[href="login.html"], a[href="account.html"]').forEach(a=>{
+    if(logged){
+      a.href = "account.html";
+      a.setAttribute("data-ne", "खाता");
+      a.setAttribute("data-en", "Account");
+      a.textContent = LANG === "ne" ? "खाता" : "Account";
+    }else{
+      a.href = "login.html";
+      a.setAttribute("data-ne", "लगइन");
+      a.setAttribute("data-en", "Login");
+      a.textContent = LANG === "ne" ? "लगइन" : "Login";
+    }
+  });
+}
+/* Authenticated GET for website account pages. A 401 means the shared
+   session died (expired token): clear it and bounce to the website
+   login — never leave a dead session rendered as a broken account. */
+async function apiAuthed(path){
+  const token = webToken();
+  const r = await fetch(API + path, {headers: {"Authorization": "Bearer " + token}});
+  if(r.status === 401){
+    clearWebSession();
+    window.location.href = "login.html";
+    throw new Error("401");
+  }
+  if(!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
 function toggleLang(){
   LANG = LANG === "ne" ? "en" : "ne";
   localStorage.setItem("kb-lang", LANG);
@@ -15,6 +74,9 @@ function applyLang(){
   document.querySelectorAll("[data-aria-ne]").forEach(el=>{
     el.setAttribute("aria-label", el.dataset[LANG === "ne" ? "ariaNe" : "ariaEn"]);
   });
+  // Session-aware chrome runs AFTER the generic swap above, so the
+  // Login/Account entry point ends in the right language + target.
+  updateAuthNav();
   // Re-render dynamic lot cards so they follow the language toggle
   const ml = document.getElementById("market-lots");
   if(ml) loadMarketLots(ml);
@@ -22,6 +84,8 @@ function applyLang(){
   if(lp) loadLotPreview();
   // lot.html renders its detail card from an inline script — re-render it too
   if(typeof renderLotDetail === "function") renderLotDetail();
+  // account.html renders its data from an inline script — re-render it too
+  if(typeof loadAccount === "function") loadAccount();
 }
 document.addEventListener("DOMContentLoaded", ()=>{
   applyLang();

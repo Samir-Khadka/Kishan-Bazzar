@@ -108,7 +108,7 @@ function checkPairs(vars, pairs, label) {
 (async function run() {
   console.log("=== Website pages (jsdom + axe-core) ===");
   const pages = ["index.html", "about.html", "contact.html", "how.html",
-                 "login.html", "lot.html", "market.html", "privacy.html",
+                 "login.html", "account.html", "lot.html", "market.html", "privacy.html",
                  "terms.html", "404.html"];
   for (const page of pages) {
     const html = fs.readFileSync(path.join(WEBSITE, page), "utf8");

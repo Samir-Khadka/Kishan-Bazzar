@@ -120,12 +120,29 @@ async function verifyOTP(){
     });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || r.status);
-    // Session keys and JSON encoding must match the app's store helper
+    // Session keys and JSON encoding match the app's store helper
     // (kisan-bazar.html: store.set/get use "kb:"+key with JSON.stringify),
-    // otherwise the app lands logged-out after this redirect.
+    // so the SAME account/token works on both surfaces — but the flows
+    // stay separate: a website login lands on the website account page,
+    // NOT in the app. The app is entered only via the explicit
+    // "Open app" (एप खोल्नुहोस्) button.
     localStorage.setItem("kb:accountToken", JSON.stringify(d.token));
     localStorage.setItem("kb:accountPhone", JSON.stringify(pendingPhone));
-    window.location.href = "/";
+    // Best-effort profile snapshot so the shared session is complete
+    // if the user later chooses to open the app. A 404 here just means
+    // "no profile yet" — the account page handles that state itself.
+    try{
+      const meRes = await fetch(API + "/v1/me", {
+        headers: {"Authorization": "Bearer " + d.token}
+      });
+      if(meRes.ok){
+        const me = await meRes.json();
+        if(me.name) localStorage.setItem("kb:accountName", JSON.stringify(me.name));
+        if(me.role) localStorage.setItem("kb:accountRole", JSON.stringify(me.role));
+        localStorage.setItem("kb:accountIsStaff", JSON.stringify(!!me.isStaff));
+      }
+    }catch(_e){}
+    window.location.href = "account.html";
   }catch(e){
     msg.textContent = (LANG==="ne" ? "त्रुटि: " : "Error: ") + e.message;
   }

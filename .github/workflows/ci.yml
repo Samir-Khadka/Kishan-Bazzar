@@ -50,6 +50,7 @@ jobs:
           node test_app.js
           node test_assistant.js
           node test_views_aplus.js
+          node test_website.js
           node test_integration.js
 
       - name: Accessibility + contrast + bilingual audit

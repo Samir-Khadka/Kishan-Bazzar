@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ne">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-ne="मेरो खाता — किसान बजार" data-en="My account — Kisan Bazar">मेरो खाता — किसान बजार</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip-link" href="#main" data-ne="सामग्रीमा जानुहोस्" data-en="Skip to content">सामग्रीमा जानुहोस्</a>
+<header class="site-header">
+  <div class="wrap header-in">
+    <a href="index.html" class="logo">🌾 <span>किसान बजार</span> <small>KISAN BAZAR</small></a>
+    <nav class="main-nav" id="main-nav">
+      <a href="index.html" data-ne="होम" data-en="Home">होम</a>
+      <a href="market.html" data-ne="बजार" data-en="Market">बजार</a>
+      <a href="how.html" data-ne="कसरी काम गर्छ" data-en="How it works">कसरी काम गर्छ</a>
+      <a href="about.html" data-ne="हाम्रो बारेमा" data-en="About">हाम्रो बारेमा</a>
+      <a href="contact.html" data-ne="सम्पर्क" data-en="Contact">सम्पर्क</a>
+      <a href="account.html" class="active" data-ne="खाता" data-en="Account">खाता</a>
+    </nav>
+    <div class="header-cta">
+      <button class="lang-toggle" onclick="toggleLang()" aria-label="Language">ने / EN</button>
+      <a href="/" class="btn-primary" data-ne="एप खोल्नुहोस्" data-en="Open app">एप खोल्नुहोस्</a>
+    </div>
+    <button class="menu-btn" onclick="document.querySelector('.main-nav').classList.toggle('open')" aria-expanded="false" aria-controls="main-nav" aria-label="मेनु" data-aria-ne="मेनु" data-aria-en="Menu">☰</button>
+  </div>
+</header>
+
+<main id="main" class="wrap" style="max-width:880px; padding:40px 20px 56px">
+  <h1 data-ne="मेरो खाता" data-en="My account">मेरो खाता</h1>
+  <p class="muted" data-ne="वेबसाइटमा लगइन हुनुहुन्छ। तपाईंको प्रोफाइल, लिस्टिङ र अर्डरहरू यहाँ छन्।" data-en="You are signed in on the website. Your profile, listings and orders are here.">वेबसाइटमा लगइन हुनुहुन्छ। तपाईंको प्रोफाइल, लिस्टिङ र अर्डरहरू यहाँ छन्।</p>
+
+  <section class="card" style="margin-top:24px" aria-labelledby="profile-h">
+    <h2 id="profile-h" style="color:var(--paddy-deep); margin-bottom:12px" data-ne="प्रोफाइल" data-en="Profile">प्रोफाइल</h2>
+    <div id="account-identity"><p class="muted" data-ne="लोड हुँदैछ…" data-en="Loading…">लोड हुँदैछ…</p></div>
+    <div style="margin-top:20px; display:flex; gap:12px; flex-wrap:wrap">
+      <a href="/" class="btn-primary" data-ne="एप खोल्नुहोस्" data-en="Open app">एप खोल्नुहोस्</a>
+      <button id="web-logout" class="btn-ghost" onclick="doWebLogout()" data-ne="लगआउट" data-en="Log out">लगआउट</button>
+    </div>
+  </section>
+
+  <section id="staff-notice" class="card" style="display:none; margin-top:20px" aria-labelledby="staff-h">
+    <h2 id="staff-h" style="color:var(--paddy-deep); margin-bottom:8px" data-ne="प्रशासक खाता" data-en="Staff account">प्रशासक खाता</h2>
+    <p data-ne="तपाईं कर्मचारी खाताले लगइन हुनुहुन्छ। प्रशासक प्यानल वेबसाइटमा छैन — त्यो एपमा मात्र उपलब्ध छ।" data-en="You are signed in with a staff account. There is no admin panel on the website — the admin panel lives in the app.">तपाईं कर्मचारी खाताले लगइन हुनुहुन्छ। प्रशासक प्यानल वेबसाइटमा छैन — त्यो एपमा मात्र उपलब्ध छ।</p>
+    <p style="margin-top:14px"><a href="/" class="btn-primary" data-ne="एप खोल्नुहोस्" data-en="Open app">एप खोल्नुहोस्</a></p>
+  </section>
+
+  <section style="margin-top:36px" aria-labelledby="listings-h">
+    <h2 id="listings-h" style="color:var(--paddy-deep); margin-bottom:8px" data-ne="मेरा लिस्टिङहरू" data-en="My listings">मेरा लिस्टिङहरू</h2>
+    <div id="my-listings"><p class="muted" data-ne="लोड हुँदैछ…" data-en="Loading…">लोड हुँदैछ…</p></div>
+  </section>
+
+  <section style="margin-top:36px" aria-labelledby="orders-h">
+    <h2 id="orders-h" style="color:var(--paddy-deep); margin-bottom:8px" data-ne="मेरा अर्डरहरू" data-en="My orders">मेरा अर्डरहरू</h2>
+    <div id="my-orders"><p class="muted" data-ne="लोड हुँदैछ…" data-en="Loading…">लोड हुँदैछ…</p></div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-in">
+    <div class="f-col">
+      <b>🌾 किसान बजार</b>
+      <p data-ne="नेपालका किसानका लागि बनेको डिजिटल बजार।" data-en="A digital marketplace built for Nepal's farmers.">नेपालका किसानका लागि बनेको डिजिटल बजार।</p>
+    </div>
+    <div class="f-col">
+      <b data-ne="बजार" data-en="Market">बजार</b>
+      <a href="market.html" data-ne="आजका लटहरू" data-en="Today's lots">आजका लटहरू</a>
+      <a href="how.html" data-ne="कसरी काम गर्छ" data-en="How it works">कसरी काम गर्छ</a>
+    </div>
+    <div class="f-col">
+      <b data-ne="कम्पनी" data-en="Company">कम्पनी</b>
+      <a href="about.html" data-ne="हाम्रो बारेमा" data-en="About us">हाम्रो बारेमा</a>
+      <a href="contact.html" data-ne="सम्पर्क" data-en="Contact">सम्पर्क</a>
+      <a href="login.html" data-ne="लगइन" data-en="Login">लगइन</a>
+    </div>
+    <div class="f-col">
+      <b data-ne="कानुनी" data-en="Legal">कानुनी</b>
+      <a href="terms.html" data-ne="सर्तहरू" data-en="Terms">सर्तहरू</a>
+      <a href="privacy.html" data-ne="गोपनीयता" data-en="Privacy">गोपनीयता</a>
+    </div>
+  </div>
+  <div class="wrap footer-base"><span>© 2026 किसान बजार · Kisan Bazar</span><span data-ne="उर्लाबारी, नेपाल" data-en="Urlabari, Nepal">उर्लाबारी, नेपाल</span></div>
+</footer>
+
+<script src="site.js"></script>
+<script src="chat.js"></script>
+<script>
+/* Website account home — the signed-in landing for the WEBSITE login
+   flow (login.html). The app has its own login and its own home; this
+   page never bounces a website user into the app. Data comes from the
+   existing OTP-token endpoints only: /v1/me, /v1/listings/mine,
+   /v1/orders/mine. There is no farmer-dues HTTP endpoint (the figure
+   exists only inside the assistant), so no dues card is shown here
+   rather than inventing one. */
+function escHtml(s){
+  return String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function doWebLogout(){
+  if(typeof clearWebSession === "function") clearWebSession();
+  else ["accountToken","accountPhone","accountName","accountRole","accountIsStaff"]
+    .forEach(k=>{ try{ localStorage.removeItem("kb:"+k); }catch(_e){} });
+  window.location.href = "index.html";
+}
+function isNe(){ return (typeof LANG === "undefined" ? "ne" : LANG) === "ne"; }
+function roleLabel(profile){
+  const ne = isNe();
+  if(profile && (profile.isStaff || profile.role === "staff")) return ne ? "कर्मचारी" : "Staff";
+  if(profile && profile.role === "buyer") return ne ? "क्रेता" : "Buyer";
+  return ne ? "किसान" : "Farmer";
+}
+async function loadAccount(){
+  const token = (typeof webToken === "function") ? webToken() : null;
+  if(!token){
+    window.location.href = "login.html";
+    return;
+  }
+  const ne = isNe();
+  const identityEl = document.getElementById("account-identity");
+  const listingsEl = document.getElementById("my-listings");
+  const ordersEl = document.getElementById("my-orders");
+
+  // ---- profile ----
+  let profile = null;
+  let noProfile = false;
+  try{
+    const r = await fetch(API + "/v1/me", {headers: {"Authorization": "Bearer " + token}});
+    if(r.status === 401){ if(typeof clearWebSession === "function") clearWebSession(); window.location.href = "login.html"; return; }
+    if(r.status === 404){ noProfile = true; }
+    else if(r.ok){ profile = await r.json(); }
+    else throw new Error(r.status);
+  }catch(e){
+    if(identityEl) identityEl.innerHTML = `<p class="muted">${ne ? "प्रोफाइल लोड हुन सकेन।" : "Could not load your profile."}</p>`;
+  }
+  if(profile){
+    if(identityEl) identityEl.innerHTML =
+      `<p style="font-size:19px"><b>${escHtml(profile.name || "")}</b></p>` +
+      `<p class="muted">${ne ? "फोन" : "Phone"}: ${escHtml(profile.phone || (typeof webPhone === "function" ? webPhone() : ""))}</p>` +
+      `<p class="muted">${ne ? "भूमिका" : "Role"}: ${escHtml(roleLabel(profile))}</p>` +
+      (profile.coop_id ? `<p class="muted">${ne ? "सहकारी" : "Co-op"}: ${escHtml(profile.coop_id)}</p>` : "");
+    const notice = document.getElementById("staff-notice");
+    if(notice && (profile.isStaff || profile.role === "staff")) notice.style.display = "block";
+  }else if(noProfile && identityEl){
+    identityEl.innerHTML =
+      `<p style="font-size:19px"><b>${escHtml(typeof webPhone === "function" ? webPhone() : "")}</b></p>` +
+      `<p class="muted">${ne ? "यो नम्बर प्रमाणित छ, तर प्रोफाइल अझै बनेको छैन। दर्ता पूरा गर्न एप खोल्नुहोस्।" : "This number is verified, but no profile exists yet. Open the app to finish registering."}</p>`;
+  }
+
+  // ---- my listings (seller) ----
+  try{
+    const listings = await apiAuthed("/v1/listings/mine");
+    if(listingsEl){
+      if(!listings || !listings.length){
+        listingsEl.innerHTML = `<p class="muted">${ne ? "अहिले कुनै लिस्टिङ छैन।" : "No listings yet."}</p>`;
+      }else{
+        listingsEl.innerHTML = listings.map(l=>{
+          const name = ne ? (CROP_NE[l.crop_code] || l.crop_code) : (CROP_EN[l.crop_code] || l.crop_code);
+          return `<div class="lot-card" style="margin-bottom:10px"><div class="em">${CROP_ICON[l.crop_code] || "🌾"}</div>` +
+            `<div class="bd"><b>${escHtml(name)}</b><p>${escHtml(l.quantity_kg)} kg · ${ne ? "ग्रेड" : "Grade"} ${escHtml(l.grade || "")} · ${escHtml(l.status || "")}</p></div>` +
+            `<div class="money"><small>${escHtml(String(l.created_at || "").slice(0, 10))}</small></div></div>`;
+        }).join("");
+      }
+    }
+  }catch(e){
+    if(String(e.message) !== "401" && listingsEl)
+      listingsEl.innerHTML = `<p class="muted">${ne ? "लिस्टिङ लोड हुन सकेन।" : "Could not load listings."}</p>`;
+  }
+
+  // ---- my orders (buyer) ----
+  try{
+    const orders = await apiAuthed("/v1/orders/mine");
+    if(ordersEl){
+      if(!orders || !orders.length){
+        ordersEl.innerHTML = `<p class="muted">${ne ? "अहिले कुनै अर्डर छैन।" : "No orders yet."}</p>`;
+      }else{
+        ordersEl.innerHTML = orders.map(o=>{
+          const total = (Number(o.quantity_kg) || 0) * (Number(o.unit_rate) || 0);
+          const paid = o.payment_status === "settled";
+          return `<div class="lot-card" style="margin-bottom:10px"><div class="em">🧾</div>` +
+            `<div class="bd"><b>${escHtml(o.lot_id || "")}</b><p>${escHtml(o.quantity_kg)} kg × रू ${escHtml(o.unit_rate)} · ${paid ? (ne ? "भुक्तानी भयो" : "Paid") : (ne ? "भुक्तानी बाँकी" : "Unpaid")}</p></div>` +
+            `<div class="money">रू ${escHtml(total)}<small>${escHtml(String(o.created_at || "").slice(0, 10))}</small></div></div>`;
+        }).join("");
+      }
+    }
+  }catch(e){
+    if(String(e.message) !== "401" && ordersEl)
+      ordersEl.innerHTML = `<p class="muted">${ne ? "अर्डर लोड हुन सकेन।" : "Could not load orders."}</p>`;
+  }
+}
+loadAccount();
+</script>
+</body>
+</html>
