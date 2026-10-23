@@ -84,6 +84,11 @@ def check_rate_limit(key: str, max_attempts: int, window_seconds: int) -> bool:
     now = time.time()
     window_start = now - window_seconds
     history = [t for t in _attempts.get(key, []) if t > window_start]
+    if not history:
+        # Drop the key entirely once its bucket is empty: on a long-lived
+        # process every distinct key (IP/phone) would otherwise linger
+        # forever as an empty list — a slow, unbounded memory leak.
+        _attempts.pop(key, None)
     if len(history) >= max_attempts:
         _attempts[key] = history
         return False

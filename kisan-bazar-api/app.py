@@ -614,25 +614,28 @@ def list_lots():
     conn = db.get_db()
     # Join cooperatives for display name + count distinct contributing farmers
     # via lot_listings -> listings, so the frontend doesn't render placeholders.
-    base = (
-        "FROM lots l "
-        "LEFT JOIN cooperatives c ON l.coop_id = c.id "
-        "WHERE 1=1"
-    )
+    where = "WHERE 1=1"
     params = []
     if coop_id:
-        base += " AND l.coop_id=?"
+        where += " AND l.coop_id=?"
         params.append(coop_id)
     if status:
-        base += " AND l.status=?"
+        where += " AND l.status=?"
         params.append(status)
-    total = conn.execute(f"SELECT COUNT(*) as c {base}", params).fetchone()["c"]
+    total = conn.execute(
+        f"SELECT COUNT(*) as c FROM lots l {where}", params).fetchone()["c"]
+    # farmer_count via one GROUP BY join, not a correlated subquery per row:
+    # the old version ran one extra query for every lot on the page (up to
+    # 200). Grouping by the lots PK keeps l.* deterministic in SQLite.
     rows = conn.execute(
         "SELECT l.*, c.name AS coop_name, "
-        "(SELECT COUNT(DISTINCT li.farmer_phone) FROM lot_listings ll "
-        " JOIN listings li ON ll.listing_id = li.id "
-        " WHERE ll.lot_id = l.id) AS farmer_count "
-        f"{base} ORDER BY l.created_at DESC LIMIT ? OFFSET ?",
+        "COUNT(DISTINCT li.farmer_phone) AS farmer_count "
+        "FROM lots l "
+        "LEFT JOIN cooperatives c ON l.coop_id = c.id "
+        "LEFT JOIN lot_listings ll ON ll.lot_id = l.id "
+        "LEFT JOIN listings li ON ll.listing_id = li.id "
+        f"{where} GROUP BY l.id "
+        "ORDER BY l.created_at DESC LIMIT ? OFFSET ?",
         params + [limit, offset],
     ).fetchall()
     conn.close()
@@ -695,10 +698,13 @@ def confirm_lot(lot_id):
 @app.get("/v1/market/lots")
 def market_lots():
     conn = db.get_db()
+    # Newest first, capped at 200: this endpoint had no ORDER BY (row order
+    # was whatever SQLite felt like) and no LIMIT, so every website visit
+    # pulled the entire ready-lots table. 200 matches /v1/lots' max page.
     rows = conn.execute(
         "SELECT l.*, c.name_ne, c.name_en FROM lots l "
         "JOIN crops c ON c.code = l.crop_code "
-        "WHERE l.status='ready'"
+        "WHERE l.status='ready' ORDER BY l.created_at DESC LIMIT 200"
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -1186,41 +1192,49 @@ def price_trends():
         days = 30
     days = max(7, min(days, 365))
     conn = db.get_db()
-    q = ("SELECT crop_code, rate_per_kg, date(created_at) as d "
+    q = ("SELECT crop_code, date(created_at) AS d, "
+         "SUM(rate_per_kg) AS s, COUNT(*) AS n, MIN(created_at) AS first_seen "
          "FROM lots WHERE rate_per_kg IS NOT NULL "
          "AND created_at >= date('now', ?)")
     params = [f"-{days} days"]
     if crop_code:
         q += " AND crop_code=?"; params.append(crop_code)
-    q += " ORDER BY created_at"
+    # Aggregate in the DB: the old version transferred every lot row in the
+    # window and grouped in Python. SUM/COUNT come from SQL; the final
+    # round() stays in Python (SQLite ROUND() rounds halves away from zero,
+    # Python rounds half to even — same input must give the same avg_rate).
+    # first_seen ordering preserves the old crop order: crops appear in the
+    # order of their first lot activity in the window.
+    q += " GROUP BY crop_code, d ORDER BY first_seen, crop_code, d"
     rows = conn.execute(q, params).fetchall()
     conn.close()
     # Group by crop, then by day (avg rate)
     by_crop = {}
     for r in rows:
-        c = r["crop_code"]
-        by_crop.setdefault(c, {}).setdefault(r["d"], []).append(r["rate_per_kg"])
-    result = {}
-    for c, days_map in by_crop.items():
-        result[c] = [{"date": d, "avg_rate": round(sum(v)/len(v), 1), "lots": len(v)}
-                     for d, v in sorted(days_map.items())]
-    return jsonify(result)
+        by_crop.setdefault(r["crop_code"], []).append({
+            "date": r["d"],
+            "avg_rate": round(r["s"] / r["n"], 1),
+            "lots": r["n"],
+        })
+    return jsonify(by_crop)
 
 
 @app.get("/v1/prices/latest")
 def latest_prices():
     """Latest rate per crop — for the market overview."""
     conn = db.get_db()
+    # One row per crop straight from the DB. The old version fetched EVERY
+    # rated lot in history (ORDER BY created_at DESC, no LIMIT) and walked
+    # them in Python — cost grew with the whole table on each call.
     rows = conn.execute(
-        "SELECT crop_code, rate_per_kg, pooled_kg, date(created_at) as d FROM lots "
-        "WHERE rate_per_kg IS NOT NULL AND status='ready' "
-        "ORDER BY created_at DESC").fetchall()
+        "SELECT crop_code, rate_per_kg, pooled_kg, date(created_at) AS d FROM ("
+        "  SELECT *, ROW_NUMBER() OVER ("
+        "    PARTITION BY crop_code ORDER BY created_at DESC, id DESC"
+        "  ) AS rn FROM lots "
+        "  WHERE rate_per_kg IS NOT NULL AND status='ready'"
+        ") WHERE rn = 1 ORDER BY crop_code").fetchall()
     conn.close()
-    seen = {}
-    for r in rows:
-        if r["crop_code"] not in seen:
-            seen[r["crop_code"]] = dict(r)
-    return jsonify(seen)
+    return jsonify({r["crop_code"]: dict(r) for r in rows})
 
 
 @app.get("/v1/stats")
@@ -1267,13 +1281,20 @@ def admin_overview():
     conn = db.get_db()
     farmers = conn.execute("SELECT phone, name, coop_id, lat, lon, payout_method, land_type, is_staff FROM farmers").fetchall()
     listings = conn.execute("SELECT id, farmer_phone, coop_id, crop_code, grade, quantity_kg, quantity_committed_kg, status, created_at FROM listings ORDER BY id DESC LIMIT 50").fetchall()
-    lots = conn.execute("SELECT id, coop_id, crop_code, grade, target_kg, pooled_kg, rate_per_kg, status, created_at FROM lots ORDER BY created_at DESC").fetchall()
+    # Row payloads capped: lots/orders grow per transaction, and the admin
+    # dashboard only renders the 5 most recent lots. Totals come from
+    # COUNT(*)/SUM(*) so the KPI cards stay exact past the cap.
+    lots = conn.execute("SELECT id, coop_id, crop_code, grade, target_kg, pooled_kg, rate_per_kg, status, created_at FROM lots ORDER BY created_at DESC LIMIT 200").fetchall()
     crops = conn.execute("SELECT code, name_ne, name_en, shelf_life_hours FROM crops").fetchall()
-    orders = conn.execute("SELECT id, buyer_name, lot_id, quantity_kg, unit_rate, created_at FROM orders ORDER BY id DESC").fetchall()
+    orders = conn.execute("SELECT id, buyer_name, lot_id, quantity_kg, unit_rate, created_at FROM orders ORDER BY id DESC LIMIT 200").fetchall()
+    total_lots = conn.execute("SELECT COUNT(*) AS c FROM lots").fetchone()["c"]
+    total_orders = conn.execute("SELECT COUNT(*) AS c FROM orders").fetchone()["c"]
+    total_listings = conn.execute("SELECT COUNT(*) AS c FROM listings").fetchone()["c"]
+    # total_kg must aggregate the whole table: the old code summed only the
+    # 50 fetched listings, so the KPI silently undercounted past 50 listings.
+    total_kg = conn.execute("SELECT COALESCE(SUM(quantity_kg), 0) AS s FROM listings").fetchone()["s"]
+    pooled_kg = conn.execute("SELECT COALESCE(SUM(pooled_kg), 0) AS s FROM lots").fetchone()["s"]
     conn.close()
-
-    total_kg = sum(r["quantity_kg"] for r in listings)
-    pooled_kg = sum(r["pooled_kg"] for r in lots)
 
     return jsonify({
         "farmers": [dict(r) for r in farmers],
@@ -1283,8 +1304,9 @@ def admin_overview():
         "orders": [dict(r) for r in orders],
         "counts": {
             "farmers": len(farmers),
-            "listings": len(listings),
-            "lots": len(lots),
+            "listings": total_listings,
+            "lots": total_lots,
+            "orders": total_orders,
             "total_kg": round(total_kg, 1),
             "pooled_kg": round(pooled_kg, 1)
         }

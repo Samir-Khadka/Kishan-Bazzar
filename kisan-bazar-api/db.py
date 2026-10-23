@@ -224,8 +224,9 @@ def init_db(fresh: bool = False):
     for idx_sql in [
         "CREATE INDEX IF NOT EXISTS idx_listings_farmer ON listings(farmer_phone)",
         "CREATE INDEX IF NOT EXISTS idx_listings_crop ON listings(crop_code)",
-        "CREATE INDEX IF NOT EXISTS idx_lots_status ON lots(status)",
+        "CREATE INDEX IF NOT EXISTS idx_lots_status_created ON lots(status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_lots_coop ON lots(coop_id)",
+        "CREATE INDEX IF NOT EXISTS idx_lots_crop_created ON lots(crop_code, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_orders_buyer ON orders(buyer_phone)",
         "CREATE INDEX IF NOT EXISTS idx_orders_lot ON orders(lot_id)",
         "CREATE INDEX IF NOT EXISTS idx_offers_lot ON offers(lot_id)",
@@ -233,6 +234,13 @@ def init_db(fresh: bool = False):
         "CREATE INDEX IF NOT EXISTS idx_diagnoses_farmer ON diagnoses(farmer_phone)",
         "CREATE INDEX IF NOT EXISTS idx_rentals_type ON rentals(machine_type)",
         "CREATE INDEX IF NOT EXISTS idx_bookings_rental ON rental_bookings(rental_id)",
+        # The idempotent() decorator deletes expired keys on EVERY guarded
+        # POST, so this cleanup needs an index or it full-scans each time.
+        "CREATE INDEX IF NOT EXISTS idx_idempotency_keys_created ON idempotency_keys(created_at)",
+        # idx_lots_status is redundant: (status, created_at) covers every
+        # status-only lookup as a leftmost prefix. Drop it so writes don't
+        # maintain two indexes for the same access path.
+        "DROP INDEX IF EXISTS idx_lots_status",
     ]:
         conn.execute(idx_sql)
     conn.commit()
