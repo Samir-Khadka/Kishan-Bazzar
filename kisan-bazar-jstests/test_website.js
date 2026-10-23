@@ -7,6 +7,16 @@
  *     and its Log out clears the session and returns to the website home;
  *   - account.html with no session bounces to the website login.
  *
+ * Session separation (2026-10-23, second round): website and app
+ * sessions are FULLY separate. The website session lives under its own
+ * "kbw:account*" localStorage keys; website code must never read or
+ * write the app's "kb:account*" keys:
+ *   - website login writes ONLY kbw: keys (app keys stay absent);
+ *   - an app-only session leaves the website logged OUT (chrome shows
+ *     Login, account.html bounces to login);
+ *   - a website-only session shows Account in the website chrome;
+ *   - website logout clears kbw: keys and leaves app keys untouched.
+ *
  * Method: the REAL website/site.js and the REAL inline scripts from
  * login.html / account.html run unmodified in a Node vm context with a
  * stubbed DOM/localStorage/fetch — the same technique as harness.js
@@ -98,6 +108,21 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
   check("account.html keeps the explicit Open app entry (at /app, the app's own address)",
         accountHtml.includes('href="/app"') && accountHtml.includes("Open app"));
 
+  console.log("\n=== source: website code never touches the app's session keys ===");
+  {
+    const webSources = { "site.js": siteJs, "login.html": loginHtml, "account.html": accountHtml };
+    for (const [name, src] of Object.entries(webSources)) {
+      const stripped = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+      check(`${name}: no reads/writes of the app's kb:account* keys`,
+            !/localStorage\.(get|set|remove)Item\(\s*"kb:/.test(stripped) &&
+            !/localStorage\.removeItem\(\s*"kb:/.test(stripped) &&
+            !/"kb:"\s*\+/.test(stripped),
+            "found a kb: localStorage access in executable code");
+      check(`${name}: website session uses the kbw: namespace`,
+            src.includes("kbw:"));
+    }
+  }
+
   console.log("\n=== website chrome: Login becomes Account with a session ===");
   {
     const mkAnchor = () => ({
@@ -113,12 +138,23 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
     const a2 = mkAnchor();
     const loggedIn = makeContext({
       anchors: [a2],
-      storage: { "kb:accountToken": JSON.stringify("tok-1") }
+      storage: { "kbw:accountToken": JSON.stringify("tok-1") }
     });
     run(loggedIn, "updateAuthNav()");
-    check("logged in: entry point becomes Account -> account.html",
+    check("logged in (website session): entry point becomes Account -> account.html",
           a2.href === "account.html" && a2.textContent === "खाता" && a2.attrs["data-en"] === "Account",
           `${a2.href} ${a2.textContent} ${JSON.stringify(a2.attrs)}`);
+
+    const a3 = mkAnchor();
+    const appOnly = makeContext({
+      anchors: [a3],
+      storage: { "kb:accountToken": JSON.stringify("tok-app"), "kb:accountPhone": JSON.stringify("9841000001") }
+    });
+    run(appOnly, "updateAuthNav()");
+    check("app-only session: website chrome still shows Login (sessions are separate)",
+          a3.href === "login.html" && a3.textContent === "लगइन", `${a3.href} ${a3.textContent}`);
+    check("app-only session: webToken() ignores the app's token",
+          run(appOnly, "webToken()") === null);
   }
 
   console.log("\n=== website login flow: OTP verify lands on account.html ===");
@@ -142,14 +178,19 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
           String(ctx.els["login-msg"].textContent));
     ctx.els["login-otp"].value = "123456";
     await run(ctx, "verifyOTP()");
-    check("verify stores the shared session token",
-          ctx.storageData["kb:accountToken"] === JSON.stringify("tok-website"),
-          ctx.storageData["kb:accountToken"]);
+    check("verify stores the WEBSITE session token (kbw: namespace)",
+          ctx.storageData["kbw:accountToken"] === JSON.stringify("tok-website"),
+          ctx.storageData["kbw:accountToken"]);
+    check("verify does NOT write the app's session keys (app stays signed out)",
+          !("kb:accountToken" in ctx.storageData) && !("kb:accountPhone" in ctx.storageData) &&
+          !("kb:accountName" in ctx.storageData) && !("kb:accountRole" in ctx.storageData) &&
+          !("kb:accountIsStaff" in ctx.storageData),
+          JSON.stringify(Object.keys(ctx.storageData)));
     check("verify lands on account.html — NOT the app",
           ctx.sandbox.window.location.href === "account.html",
           ctx.sandbox.window.location.href);
-    check("profile snapshot stored for the shared session",
-          ctx.storageData["kb:accountName"] === JSON.stringify("Sarita Tamang"));
+    check("profile snapshot stored in the WEBSITE session",
+          ctx.storageData["kbw:accountName"] === JSON.stringify("Sarita Tamang"));
   }
 
   console.log("\n=== account page: identity + real listings/orders + logout ===");
@@ -165,7 +206,12 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
     };
     const ctx = makeContext({
       fetchImpl,
-      storage: { "kb:accountToken": JSON.stringify("tok-website"), "kb:accountPhone": JSON.stringify("9841000001") }
+      storage: {
+        "kbw:accountToken": JSON.stringify("tok-website"), "kbw:accountPhone": JSON.stringify("9841000001"),
+        // A coexisting APP session (e.g. the user signed into the app
+        // separately) must survive a website logout untouched.
+        "kb:accountToken": JSON.stringify("tok-app"), "kb:accountPhone": JSON.stringify("9841000001")
+      }
     });
     for (const s of inlineScripts(accountHtml)) vm.runInContext(s, ctx.sandbox, { filename: "account-inline.js" });
     await sleep(30); // loadAccount() runs on script load
@@ -183,9 +229,13 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
           ctx.els["staff-notice"].style.display !== "block");
 
     run(ctx, "doWebLogout()");
-    check("website Log out clears the session keys",
-          !("kb:accountToken" in ctx.storageData) && !("kb:accountPhone" in ctx.storageData),
+    check("website Log out clears the WEBSITE session keys",
+          !("kbw:accountToken" in ctx.storageData) && !("kbw:accountPhone" in ctx.storageData),
           JSON.stringify(Object.keys(ctx.storageData)));
+    check("website Log out leaves the APP session untouched",
+          ctx.storageData["kb:accountToken"] === JSON.stringify("tok-app") &&
+          ctx.storageData["kb:accountPhone"] === JSON.stringify("9841000001"),
+          JSON.stringify(ctx.storageData));
     check("website Log out returns to the website home",
           ctx.sandbox.window.location.href === "index.html",
           ctx.sandbox.window.location.href);
@@ -202,7 +252,7 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
     };
     const ctx = makeContext({
       fetchImpl,
-      storage: { "kb:accountToken": JSON.stringify("tok-2"), "kb:accountPhone": JSON.stringify("9841000002") }
+      storage: { "kbw:accountToken": JSON.stringify("tok-2"), "kbw:accountPhone": JSON.stringify("9841000002") }
     });
     for (const s of inlineScripts(accountHtml)) vm.runInContext(s, ctx.sandbox, { filename: "account-inline.js" });
     await sleep(30);
@@ -225,7 +275,7 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
     };
     const ctx = makeContext({
       fetchImpl,
-      storage: { "kb:accountToken": JSON.stringify("tok-staff"), "kb:accountPhone": JSON.stringify("9801100000") }
+      storage: { "kbw:accountToken": JSON.stringify("tok-staff"), "kbw:accountPhone": JSON.stringify("9801100000") }
     });
     for (const s of inlineScripts(accountHtml)) vm.runInContext(s, ctx.sandbox, { filename: "account-inline.js" });
     await sleep(30);
@@ -240,6 +290,23 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
     for (const s of inlineScripts(accountHtml)) vm.runInContext(s, ctx.sandbox, { filename: "account-inline.js" });
     await sleep(10);
     check("no session -> redirect to login.html",
+          ctx.sandbox.window.location.href === "login.html",
+          ctx.sandbox.window.location.href);
+  }
+  {
+    // Only an APP session exists (leftover/shared keys included): the
+    // website must treat the user as logged out — the app session is
+    // never adopted as a website session.
+    const ctx = makeContext({
+      storage: {
+        "kb:accountToken": JSON.stringify("tok-app"), "kb:accountPhone": JSON.stringify("9841000001"),
+        "kb:accountName": JSON.stringify("App User"), "kb:accountRole": JSON.stringify("farmer"),
+        "kb:accountIsStaff": JSON.stringify(false)
+      }
+    });
+    for (const s of inlineScripts(accountHtml)) vm.runInContext(s, ctx.sandbox, { filename: "account-inline.js" });
+    await sleep(10);
+    check("app-only session -> account.html still bounces to the website login",
           ctx.sandbox.window.location.href === "login.html",
           ctx.sandbox.window.location.href);
   }

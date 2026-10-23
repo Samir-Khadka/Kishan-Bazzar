@@ -2,30 +2,35 @@
 const API = "";  // same origin — API lives at /v1/* alongside /site/*
 let LANG = localStorage.getItem("kb-lang") || "ne";
 
-/* ---------------- website session (shared account, separate flow) ----
-   The website and the app use the SAME account and bearer token
-   (stored under the app's kb:account* keys, same origin) — but they
-   are separate login FLOWS: signing in on the website stays on the
-   website (account.html), and the app is entered only via the
-   explicit "Open app" button. Logging out on the website clears the
-   shared session keys and returns to the website home. */
+/* ---------------- website session (fully separate from the app) ----
+   The website and the app are separate surfaces with separate
+   sessions, even though they share one account on the server: a
+   website login must NOT sign the app in, and an app login must NOT
+   sign the website in. The app keeps its session under its own
+   "kb:account*" localStorage keys; the website NEVER reads or writes
+   those keys. The website session lives under its own "kbw:account*"
+   namespace, written only by the website login (login.html) and
+   cleared only by a website logout. Leftover "kb:" keys (app session,
+   or written by the pre-separation website flow) are simply ignored
+   here — never adopted as a website session. */
+const WEB_KEY = "kbw:";
 function webToken(){
   try{
-    const raw = localStorage.getItem("kb:accountToken");
+    const raw = localStorage.getItem(WEB_KEY + "accountToken");
     if(!raw) return null;
     try{ return JSON.parse(raw); }catch(_e){ return raw; }
   }catch(_e){ return null; }
 }
 function webPhone(){
   try{
-    const raw = localStorage.getItem("kb:accountPhone");
+    const raw = localStorage.getItem(WEB_KEY + "accountPhone");
     if(!raw) return "";
     try{ return JSON.parse(raw) || ""; }catch(_e){ return raw; }
   }catch(_e){ return ""; }
 }
 function clearWebSession(){
   ["accountToken","accountPhone","accountName","accountRole","accountIsStaff"]
-    .forEach(k=>{ try{ localStorage.removeItem("kb:"+k); }catch(_e){} });
+    .forEach(k=>{ try{ localStorage.removeItem(WEB_KEY + k); }catch(_e){} });
 }
 /* Header/footer chrome reflects session state: every Login entry
    point (href login.html / account.html) becomes "Account" while a
@@ -46,9 +51,10 @@ function updateAuthNav(){
     }
   });
 }
-/* Authenticated GET for website account pages. A 401 means the shared
-   session died (expired token): clear it and bounce to the website
-   login — never leave a dead session rendered as a broken account. */
+/* Authenticated GET for website account pages. A 401 means the
+   website session died (expired token): clear it and bounce to the
+   website login — never leave a dead session rendered as a broken
+   account. Only the website (kbw:) session is touched. */
 async function apiAuthed(path){
   const token = webToken();
   const r = await fetch(API + path, {headers: {"Authorization": "Bearer " + token}});

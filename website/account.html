@@ -100,7 +100,7 @@ function escHtml(s){
 function doWebLogout(){
   if(typeof clearWebSession === "function") clearWebSession();
   else ["accountToken","accountPhone","accountName","accountRole","accountIsStaff"]
-    .forEach(k=>{ try{ localStorage.removeItem("kb:"+k); }catch(_e){} });
+    .forEach(k=>{ try{ localStorage.removeItem("kbw:"+k); }catch(_e){} });
   window.location.href = "index.html";
 }
 function isNe(){ return (typeof LANG === "undefined" ? "ne" : LANG) === "ne"; }

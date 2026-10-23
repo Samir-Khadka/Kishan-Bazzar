@@ -120,26 +120,25 @@ async function verifyOTP(){
     });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || r.status);
-    // Session keys and JSON encoding match the app's store helper
-    // (kisan-bazar.html: store.set/get use "kb:"+key with JSON.stringify),
-    // so the SAME account/token works on both surfaces — but the flows
-    // stay separate: a website login lands on the website account page,
-    // NOT in the app. The app is entered only via the explicit
-    // "Open app" (एप खोल्नुहोस्) button.
-    localStorage.setItem("kb:accountToken", JSON.stringify(d.token));
-    localStorage.setItem("kb:accountPhone", JSON.stringify(pendingPhone));
-    // Best-effort profile snapshot so the shared session is complete
-    // if the user later chooses to open the app. A 404 here just means
-    // "no profile yet" — the account page handles that state itself.
+    // Website session ONLY: the token is stored under the website's
+    // own "kbw:account*" keys. The app's session keys ("kb:account*")
+    // are deliberately NOT touched — website and app sessions are
+    // fully separate, so signing in here does not sign the app in,
+    // and this session is cleared only by a website logout.
+    localStorage.setItem("kbw:accountToken", JSON.stringify(d.token));
+    localStorage.setItem("kbw:accountPhone", JSON.stringify(pendingPhone));
+    // Best-effort profile snapshot for the website session (shown on
+    // the website account page). A 404 here just means "no profile
+    // yet" — the account page handles that state itself.
     try{
       const meRes = await fetch(API + "/v1/me", {
         headers: {"Authorization": "Bearer " + d.token}
       });
       if(meRes.ok){
         const me = await meRes.json();
-        if(me.name) localStorage.setItem("kb:accountName", JSON.stringify(me.name));
-        if(me.role) localStorage.setItem("kb:accountRole", JSON.stringify(me.role));
-        localStorage.setItem("kb:accountIsStaff", JSON.stringify(!!me.isStaff));
+        if(me.name) localStorage.setItem("kbw:accountName", JSON.stringify(me.name));
+        if(me.role) localStorage.setItem("kbw:accountRole", JSON.stringify(me.role));
+        localStorage.setItem("kbw:accountIsStaff", JSON.stringify(!!me.isStaff));
       }
     }catch(_e){}
     window.location.href = "account.html";
