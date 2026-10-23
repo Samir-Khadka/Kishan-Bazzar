@@ -7,10 +7,11 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<a class="skip-link" href="#main" data-ne="सामग्रीमा जानुहोस्" data-en="Skip to content">सामग्रीमा जानुहोस्</a>
 <header class="site-header">
   <div class="wrap header-in">
     <a href="index.html" class="logo">🌾 <span>किसान बजार</span> <small>KISAN BAZAR</small></a>
-    <nav class="main-nav">
+    <nav class="main-nav" id="main-nav">
       <a href="index.html" data-ne="होम" data-en="Home">होम</a>
       <a href="market.html" data-ne="बजार" data-en="Market">बजार</a>
       <a href="how.html" data-ne="कसरी काम गर्छ" data-en="How it works">कसरी काम गर्छ</a>
@@ -20,10 +21,10 @@
     </nav>
     <div class="header-cta"><button class="lang-toggle" onclick="toggleLang()">ने / EN</button>
       <a href="/" class="btn-primary" data-ne="एप खोल्नुहोस्" data-en="Open app">एप खोल्नुहोस्</a></div>
-    <button class="menu-btn" onclick="document.querySelector('.main-nav').classList.toggle('open')">☰</button>
+    <button class="menu-btn" onclick="document.querySelector('.main-nav').classList.toggle('open')" aria-expanded="false" aria-controls="main-nav" aria-label="मेनु" data-aria-ne="मेनु" data-aria-en="Menu">☰</button>
   </div>
 </header>
-<main>
+<main id="main">
   <div class="page-hero"><div class="wrap"><h1 data-ne="हाम्रो बारेमा" data-en="About us">हाम्रो बारेमा</h1></div></div>
   <div class="wrap prose">
     <p data-ne="किसान बजार नेपालका साना किसानलाई बजारसँग सिधै जोड्ने उद्देश्यले बनेको हो। बिचौलियाका कारण किसानले पाउने भाउ र उपभोक्ताले तिर्ने भाउबीच ठूलो अन्तर छ — हामी त्यो अन्तर घटाउँछौं।" data-en="Kisan Bazar exists to connect Nepal's smallholder farmers directly with markets. Middlemen create a huge gap between what farmers receive and what consumers pay — we shrink that gap.">किसान बजार नेपालका साना किसानलाई बजारसँग सिधै जोड्ने उद्देश्यले बनेको हो।</p>

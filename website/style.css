@@ -17,13 +17,14 @@ a:hover{text-decoration:underline}
 .logo{color:#fff; font-weight:800; font-size:20px; display:flex; align-items:center; gap:8px}
 .logo small{font-size:11px; font-weight:600; opacity:.7; letter-spacing:1px}
 .main-nav{display:flex; gap:4px; margin-left:12px}
-.main-nav a{color:#E8F0E8; padding:8px 14px; border-radius:8px; font-weight:600; font-size:15px}
+.main-nav a{color:#E8F0E8; padding:11px 14px; border-radius:8px; font-weight:600; font-size:15px}
 .main-nav a:hover{background:rgba(255,255,255,.12); text-decoration:none}
 .main-nav a.active{background:rgba(255,255,255,.18); color:#fff}
 .header-cta{margin-left:auto; display:flex; gap:10px; align-items:center}
 .lang-toggle{background:transparent; border:1px solid rgba(255,255,255,.4); color:#fff;
-  border-radius:99px; padding:6px 12px; font-weight:700; cursor:pointer; font-size:13px}
-.menu-btn{display:none; background:none; border:none; color:#fff; font-size:22px; cursor:pointer}
+  border-radius:99px; padding:10px 14px; min-height:44px; font-weight:700; cursor:pointer; font-size:13px}
+.menu-btn{display:none; background:none; border:none; color:#fff; font-size:22px; cursor:pointer;
+  min-width:44px; min-height:44px; padding:10px}
 
 /* buttons */
 .btn-primary{background:var(--tori); color:#241C00; font-weight:800; padding:10px 20px;
@@ -110,5 +111,12 @@ a:hover{text-decoration:underline}
   .cards3{grid-template-columns:1fr}
   .footer-in{grid-template-columns:1fr 1fr}
 }
-.empty{text-align:center; padding:48px 20px; color:var(--muted)}
+.empty{text-align:center; padding:48px 20px; color:var(--ink-2)}
 .empty p{margin-bottom:16px}
+
+/* keyboard focus: a visible ring on every interactive element —
+   previously there were NO focus styles anywhere on the site */
+:focus-visible{outline:3px solid var(--tori); outline-offset:2px; border-radius:4px}
+.skip-link{position:absolute; left:12px; top:-60px; z-index:100; background:var(--paddy-deep);
+  color:#fff; padding:12px 18px; border-radius:0 0 10px 10px; font-weight:700; transition:top .15s}
+.skip-link:focus{top:0}

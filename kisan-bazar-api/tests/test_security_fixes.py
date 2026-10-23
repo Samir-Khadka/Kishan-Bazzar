@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import threading
 import seed
 import app as app_module
+import routes_auth  # owns the DEMO_MODE flag the auth routes read
 import auth
 
 PHONE = "9841000001"       # Sarita Tamang, farmer
@@ -65,7 +66,7 @@ def run():
     passed += 1
 
     print("\n=== 4. Dev OTP endpoint is 404 without DEMO_MODE ===")
-    assert app_module.DEMO_MODE is False, "tests run with DEMO_MODE off"
+    assert routes_auth.DEMO_MODE is False, "tests run with DEMO_MODE off"
     client.post("/v1/auth/request-code", json={"phone": PHONE})
     r = client.get(f"/v1/dev/latest-code/{PHONE}")
     assert r.status_code == 404, r.get_json()
@@ -73,14 +74,14 @@ def run():
     passed += 1
 
     print("\n=== 5. Dev OTP endpoint works with DEMO_MODE on ===")
-    app_module.DEMO_MODE = True
+    routes_auth.DEMO_MODE = True
     try:
         r = client.get(f"/v1/dev/latest-code/{PHONE}")
         assert r.status_code == 200, r.get_json()
         assert "code" in r.get_json()
         print(f"  PASS — 200 with code when DEMO_MODE is on")
     finally:
-        app_module.DEMO_MODE = False
+        routes_auth.DEMO_MODE = False
     passed += 1
 
     print("\n=== 6. Admin overview requires staff auth ===")
@@ -129,11 +130,14 @@ def run():
     lot = [l for l in r.get_json()["data"] if l["id"] == lot_id][0]
     assert lot["status"] == "ready", lot
     pooled = lot["pooled_kg"]
+    yak_headers = {"Authorization": f"Bearer {auth.issue_token('9800000001')}"}
     r = client.post("/v1/orders", json={"buyer_name": "Hotel Yak", "buyer_phone": "9800000001",
-                                        "lot_id": lot_id, "quantity_kg": pooled})
+                                        "lot_id": lot_id, "quantity_kg": pooled},
+                    headers=yak_headers)
     assert r.status_code == 201, r.get_json()
     r = client.post("/v1/orders", json={"buyer_name": "Hotel Yak", "buyer_phone": "9800000001",
-                                        "lot_id": lot_id, "quantity_kg": 1})
+                                        "lot_id": lot_id, "quantity_kg": 1},
+                    headers=yak_headers)
     assert r.status_code == 400, r.get_json()
     print(f"  PASS — first order took all {pooled}kg, second order rejected")
     passed += 1
@@ -223,12 +227,16 @@ def run():
     race_lot = [l for l in r.get_json()["data"] if l["id"] == race_lot_id][0]
     race_pooled = race_lot["pooled_kg"]
     # Five buyers each try to buy the WHOLE lot at the same instant.
+    # Each races with their OWN token (orders require buyer auth now);
+    # tokens are issued directly to keep the threads setup-only.
+    race_tokens = {i: auth.issue_token(f"98610000{i:02d}") for i in range(5)}
     results = []
     def fire(i):
         c = app_module.app.test_client()
         rr = c.post("/v1/orders",
                     json={"buyer_name": f"Racer {i}", "buyer_phone": f"98610000{i:02d}",
-                          "lot_id": race_lot_id, "quantity_kg": race_pooled})
+                          "lot_id": race_lot_id, "quantity_kg": race_pooled},
+                    headers={"Authorization": f"Bearer {race_tokens[i]}"})
         results.append(rr.status_code)
     threads = [threading.Thread(target=fire, args=(i,)) for i in range(5)]
     for t in threads: t.start()

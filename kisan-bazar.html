@@ -31,7 +31,7 @@
   --alert-soft:#FBE3DD;
   --ink:#16211B;
   --ink-2:#4A5851;
-  --ink-3:#7E8C85;
+  --ink-3:#56645C;
   --paper:#EFF2EA;
   --card:#FFFFFF;
   --line:#D8DFD3;
@@ -42,14 +42,14 @@
 :root:not([data-theme="light"]){}
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --ink:#E8EFE9; --ink-2:#A7B6AD; --ink-3:#7C8B82;
+    --ink:#E8EFE9; --ink-2:#A7B6AD; --ink-3:#8A9A90;
     --paper:#10150F; --card:#1A211B; --line:#2C3830;
     --tori-soft:#3A2F08; --alert-soft:#3A180F;
     --paddy:#3E9D6E; --paddy-deep:#0B2A1C;
   }
 }
 :root[data-theme="dark"]{
-  --ink:#E8EFE9; --ink-2:#A7B6AD; --ink-3:#7C8B82;
+  --ink:#E8EFE9; --ink-2:#A7B6AD; --ink-3:#8A9A90;
   --paper:#10150F; --card:#1A211B; --line:#2C3830;
   --tori-soft:#3A2F08; --alert-soft:#3A180F;
   --paddy:#3E9D6E; --paddy-deep:#0B2A1C;
@@ -299,7 +299,7 @@ select{
   background:var(--paddy-deep); color:#F2F7F0; font-weight:700; font-size:15px; flex:0 0 auto;
 }
 .chatHeader button{color:#F2F7F0; font-size:17px; padding:2px 8px}
-.chatMsgs{flex:1 1 auto; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; min-height:140px}
+.chatMsgs{flex:1 1 auto; overflow-y:auto; overscroll-behavior:contain; padding:14px; display:flex; flex-direction:column; gap:10px; min-height:140px}
 .chatRow{display:flex}
 .chatRow.user{justify-content:flex-end}
 .botBubble{background:var(--paper); border:1px solid var(--line); border-radius:14px 14px 14px 4px; padding:10px 13px; max-width:85%; font-size:14.5px; line-height:1.5}
@@ -942,7 +942,7 @@ async function loadLots(){
    render
    =================================================================== */
 const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc = s => String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 const TABS = {
   farmer:[["today","🏠","आज","Today"],["sell","🧺","बेच्ने","Sell"],["advice","🌱","सल्लाह","Advice"],["doctor","🩺","डा. किसान","Crop Doctor"],["rental","🚜","भाडा","Rent"],["mine","👤","मेरो","Mine"]],
@@ -1051,13 +1051,39 @@ function viewToday(){
     `<div class="fcd ${r>=60?"wet":""}"><b>${esc(T(ne,en))}</b><div class="ic" aria-hidden="true">${ic}</div>
      <div class="t">${esc(N(t))}°</div><div class="r">${esc(N(r))}%</div></div>`).join("");
 
+  // Today's rates: LIVE lot rates from /v1/prices/latest when the
+  // backend has them — the change arrow is computed from the real
+  // trend series (last day vs the day before), and no arrow is shown
+  // when there aren't two recorded days to compare. The static CROPS
+  // table below is only an offline fallback, and the strip then
+  // carries the same "(demo data)" source badge the weather card has.
+  if(isStale(latestCache, 120000)) refreshOnce("latest", ()=>latestCache.data, fetchLatest);
+  const liveRates = latestCache.data || {};
+  const trendData = trendsCache.data || {};
+  const CODE_OF = {};
+  for(const [code,key] of Object.entries(CROP_CODE_MAP)) CODE_OF[key] = code;
+  let anyLive = false;
   const near = ["tomato","cauliflower","potato","ginger","onion"].map(k=>{
-    const c=CROPS[k], dir=c.chg>0?"up":c.chg<0?"down":"flat0";
-    const arrow=c.chg>0?"▲":c.chg<0?"▼":"—";
+    const c=CROPS[k], code=CODE_OF[k];
+    const live = code && liveRates[code];
+    let rate = c.rate, chg = c.chg;
+    if(live){
+      anyLive = true;
+      rate = live.rate_per_kg;
+      const pts = trendData[code] || [];
+      chg = pts.length >= 2
+        ? +(pts[pts.length-1].avg_rate - pts[pts.length-2].avg_rate).toFixed(1)
+        : null;
+    }
+    const dir = chg===null ? "flat0" : chg>0 ? "up" : chg<0 ? "down" : "flat0";
+    const arrow = chg===null ? "" : chg>0 ? "▲" : chg<0 ? "▼" : "—";
     return `<div class="prow"><div class="em" aria-hidden="true">${c.ic}</div>
       <div class="nm"><b>${esc(T(c.ne,c.en))}</b><span>${esc(T("कालीमाटी थोक · प्रतिकेजी","Kalimati wholesale · per kg"))}</span></div>
-      <div class="pr"><b>${esc(money(c.rate))}</b><span class="${dir}">${arrow} ${esc(N(Math.abs(c.chg)))}</span></div></div>`;
+      <div class="pr"><b>${esc(money(rate))}</b><span class="${dir}">${arrow}${chg===null?"":" "+esc(N(Math.abs(chg)))}</span></div></div>`;
   }).join("");
+  const ratesSrc = anyLive
+    ? `<div class="warn-src">${esc(T("स्रोत: किसान बजार लट भाउ (वास्तविक डेटा)","Source: Kisan Bazar lot rates (live data)"))}</div>`
+    : `<div class="warn-src">${esc(T("स्रोत: कालीमाटी थोक (नमुना डेटा)","Source: Kalimati wholesale (demo data)"))}</div>`;
 
   const mine = S.offers.filter(o=>o.status!=="paid");
 
@@ -1081,6 +1107,7 @@ function viewToday(){
 
     <h2 class="sec">${esc(T("आजको भाउ","Today's rates"))}</h2>
     <div class="prices">${near}</div>
+    ${ratesSrc}
 
     <div id="priceTrends">${renderPriceTrends()}</div>
 
@@ -1140,6 +1167,20 @@ async function fetchTrends(){
     trendsCache = {data: await res.json(), at: now};
     return trendsCache.data;
   }catch(e){ return trendsCache.data; }
+}
+
+/* ---------------- latest lot rates (Today's rates strip) ---------------- */
+let latestCache = {data:null, at:0};
+async function fetchLatest(){
+  if(!BACKEND.enabled) return null;
+  const now = Date.now();
+  if(latestCache.data && now - latestCache.at < 120000) return latestCache.data;
+  try{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/prices/latest`);
+    if(!res.ok) throw new Error(res.status);
+    latestCache = {data: await res.json(), at: now};
+    return latestCache.data;
+  }catch(e){ return latestCache.data; }
 }
 
 function sparkline(points, w=260, h=60){
@@ -1499,7 +1540,7 @@ function renderAuthModal(){
   if(step === "phone"){
     body = `
       <p class="muted" style="margin-bottom:14px">${esc(T("फोन नम्बरमा OTP कोड पठाइनेछ","An OTP code will be sent to your phone"))}</p>
-      <label style="font-weight:600;font-size:14px">${esc(T("मोबाइल नम्बर","Mobile number"))}</label>
+      <label for="auth-phone" style="font-weight:600;font-size:14px">${esc(T("मोबाइल नम्बर","Mobile number"))}</label>
       <input id="auth-phone" type="tel" inputmode="numeric" placeholder="98XXXXXXXX" maxlength="10" value="${esc(account.phone||"")}"
         style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin:6px 0 12px">
       <div style="font-weight:600;font-size:14px;margin-bottom:6px">${esc(T("भूमिका छान्नुहोस्","Choose your role"))}</div>
@@ -1522,10 +1563,10 @@ function renderAuthModal(){
   } else if(step === "admin"){
     body = `
       <p class="muted" style="margin-bottom:14px">${esc(T("साइट प्रशासकका लागि — प्रयोगकर्ता, लट र भाउ व्यवस्थापन।","For the site administrator — manage users, lots, and prices."))}</p>
-      <label style="font-weight:600;font-size:14px">${esc(T("प्रयोगकर्ता नाम","Username"))}</label>
+      <label for="admin-user" style="font-weight:600;font-size:14px">${esc(T("प्रयोगकर्ता नाम","Username"))}</label>
       <input id="admin-user" type="text" autocomplete="username" placeholder="admin"
         style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin:6px 0 12px">
-      <label style="font-weight:600;font-size:14px">${esc(T("पासवर्ड","Password"))}</label>
+      <label for="admin-pass" style="font-weight:600;font-size:14px">${esc(T("पासवर्ड","Password"))}</label>
       <input id="admin-pass" type="password" autocomplete="current-password" placeholder="••••••••"
         style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin:6px 0 12px">
       ${account.lastError?`<p style="color:var(--alert);font-size:14px;margin-bottom:10px">${esc(account.lastError)}</p>`:""}
@@ -1537,8 +1578,8 @@ function renderAuthModal(){
   } else if(step === "code_sent"){
     body = `
       <p class="muted" style="margin-bottom:14px">${esc(T("कोड पठाइयो:","Code sent to:"))} <b>${esc(account.phone)}</b></p>
-      <label style="font-weight:600;font-size:14px">${esc(T("OTP कोड","OTP code"))}</label>
-      <input id="auth-code" type="text" inputmode="numeric" placeholder="••••••" maxlength="6" value="${esc(account.codeDraft||"")}"
+      <label for="auth-code" style="font-weight:600;font-size:14px">${esc(T("OTP कोड","OTP code"))}</label>
+      <input id="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="••••••" maxlength="6" value="${esc(account.codeDraft||"")}"
         style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:20px;letter-spacing:6px;text-align:center;margin:6px 0 12px">
       ${account.lastError?`<p style="color:var(--alert);font-size:14px;margin-bottom:10px">${esc(account.lastError)}</p>`:""}
       <button class="btn primary" style="width:100%;padding:13px" onclick="doAuthVerifyCode()" ${account.busy?"disabled":""}>
@@ -1548,7 +1589,7 @@ function renderAuthModal(){
   } else if(step === "register"){
     body = `
       <p class="muted" style="margin-bottom:14px">${esc(T("नयाँ खाता — विवरण भर्नुहोस्","New account — fill in your details"))}</p>
-      <label style="font-weight:600;font-size:14px">${esc(T("नाम","Name"))}</label>
+      <label for="auth-name" style="font-weight:600;font-size:14px">${esc(T("नाम","Name"))}</label>
       <input id="auth-name" type="text" placeholder="${esc(T("तपाईंको नाम","Your name"))}" value="${esc(account.name||"")}"
         style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin:6px 0 12px">
       ${account.lastError?`<p style="color:var(--alert);font-size:14px;margin-bottom:10px">${esc(account.lastError)}</p>`:""}
@@ -1683,7 +1724,7 @@ function renderSahayak(){
     ? `<button id="chatVoice" class="${chat.voiceOut?"on":""}" aria-label="${esc(T('जवाफ सुनाउने','Read replies aloud'))}" aria-pressed="${chat.voiceOut}">🔈</button>`
     : "";
 
-  return fab + `<div class="chatPanel" role="dialog" aria-label="${esc(T('किसान सहायक','Kisan Sahayak'))}">
+  return fab + `<div class="chatPanel" role="dialog" aria-modal="true" aria-label="${esc(T('किसान सहायक','Kisan Sahayak'))}">
     <div class="chatHeader">
       <span>🤖 ${esc(T('किसान सहायक','Kisan Sahayak'))}</span>
       <span class="chatOnline">${esc(T('अनलाइन','online'))}</span>
@@ -1692,7 +1733,7 @@ function renderSahayak(){
     <div class="chatMsgs" id="chatMsgs">${msgs}${typing}</div>
     <div class="chatInputRow">
       ${voiceBtn}${micBtn}
-      <input id="chatInput" placeholder="${esc(T('यहाँ लेख्नुहोस् वा 🎤 थिच्नुहोस्...','Type here or tap 🎤...'))}" autocomplete="off" ${chat.typing?"disabled":""}>
+      <input id="chatInput" aria-label="Message" placeholder="${esc(T('यहाँ लेख्नुहोस् वा 🎤 थिच्नुहोस्...','Type here or tap 🎤...'))}" autocomplete="off" ${chat.typing?"disabled":""}>
       <button id="chatSend" aria-label="${esc(T('पठाउनुहोस्','Send'))}">➤</button>
     </div>
   </div>`;
@@ -1823,13 +1864,18 @@ async function doDiagnose(){
     toast(T("लक्षण लेख्नुहोस् वा फोटो हाल्नुहोस्","Describe symptoms or add a photo"));
     return;
   }
+  if(!account.token){
+    toast(T("निदानका लागि पहिले लगइन गर्नुहोस्","Log in first for a diagnosis"));
+    return;
+  }
   doctor.symptoms = symptoms; doctor.busy = true; render({skipScroll:true});
   try{
     if(!BACKEND.enabled) throw new Error(T("इन्टरनेट चाहिन्छ","Internet needed"));
     const res = await fetch(`${BACKEND.baseUrl}/v1/crop-doctor/diagnose`, {
-      method:"POST", headers:{"Content-Type":"application/json"},
+      method:"POST", headers:{"Content-Type":"application/json",
+                              "Authorization": "Bearer " + account.token},
       body: JSON.stringify({crop_code: doctor.crop, symptoms: symptoms || "(फोटो मात्र)",
-                            farmer_phone: account.phone || null, photo_ref: doctor.photoRef})
+                            photo_ref: doctor.photoRef})
     });
     const data = await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.error || res.status);
@@ -1847,7 +1893,7 @@ function renderLandScan(){
 
   if (scan.step === "intro"){
     return dots + `<div class="scanBox">
-      ${scan.photoDataUrl ? `<img class="photoPreview" src="${scan.photoDataUrl}" alt="">` : `<span class="ic" aria-hidden="true">🌱📷</span>`}
+      ${scan.photoDataUrl ? `<img class="photoPreview" src="${scan.photoDataUrl}" alt="${esc(T("तपाईंको माटोको फोटो","Photo of your soil"))}">` : `<span class="ic" aria-hidden="true">🌱📷</span>`}
       <div style="font-weight:700;font-size:16px">${esc(T("आफ्नो जग्गाको माटोको फोटो खिच्नुहोस्","Take a photo of your land's soil"))}</div>
       <div style="color:var(--ink-2);font-size:14px;margin-top:5px">${esc(T("घाममा, नजिकबाट खिच्नुहोस् — माटोको रङ छर्लंग देखियोस्।","In daylight, close up — so the soil colour shows clearly."))}</div>
       <button class="camBtn" id="scanCapture">📷 ${esc(scan.photoDataUrl ? T("फेरि खिच्नुहोस्","Retake photo") : T("फोटो खिच्नुहोस्","Take photo"))}</button>
@@ -1896,7 +1942,7 @@ function renderLandScan(){
       : "";
     return `<div class="stack">
       <div class="card" style="border-left:7px solid var(--paddy)">
-        ${scan.photoDataUrl ? `<img class="photoPreview" src="${scan.photoDataUrl}" alt="">` : ""}
+        ${scan.photoDataUrl ? `<img class="photoPreview" src="${scan.photoDataUrl}" alt="${esc(T("तपाईंको माटोको फोटो","Photo of your soil"))}">` : ""}
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
           <span aria-hidden="true" style="font-size:22px">${land.ic}</span>
           <div style="font-weight:800;font-size:18px">${esc(T(land.ne,land.en))}</div>
@@ -2264,7 +2310,7 @@ async function doSubmitOffer(){
     toast(T("भाउ र मात्रा सही लेख्नुहोस्","Enter a valid rate and quantity"));
     return;
   }
-  // The backend requires the buyer's own JWT on /v1/offers — bids are
+  // The backend requires the buyer's own token on /v1/offers — bids are
   // bound to the token's phone, so nobody can bid as someone else's number.
   const headers = {"Content-Type": "application/json"};
   if(account.token) headers["Authorization"] = "Bearer " + account.token;
@@ -2325,7 +2371,8 @@ async function doPlaceOrder(){
         // Idempotency-Key: one UUID per tap. If the request retries after a
         // dropped connection, the server replays the original response
         // instead of creating a duplicate order.
-        headers: {"Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID()},
+        headers: {"Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID(),
+                  "Authorization": "Bearer " + account.token},
         body: JSON.stringify({
           buyer_name: buyerName || "Buyer",
           buyer_phone: buyerPhone,
@@ -2459,7 +2506,49 @@ function viewHow(){
 }
 
 /* ---------------- CO-OP ---------------- */
+/* Co-op views (pool / route / board) show REAL data when the
+   signed-in staff user's admin overview has loaded; otherwise they
+   show sample content under a visible demo badge — the same honesty
+   rule as the weather card. Invented figures must never pose as live
+   operations data. */
+const DEMO_BADGE = `<div class="warn-src" style="margin:0 0 10px">${esc(T("⚠ नमुना डेटा — वास्तविक सहकारी डेटा स्टाफ लगइनपछि देखिन्छ","⚠ Demo data — real co-op data appears after staff login"))}</div>`;
+
+function coopData(){
+  if(account.isStaff && BACKEND.enabled && !adminCache.data && !adminCache.err)
+    refreshOnce("admin", ()=>adminCache.data, fetchAdminOverview);
+  return (account.isStaff && adminCache.data) ? adminCache.data : null;
+}
+
 function viewPool(){
+  const d = coopData();
+  if(d){
+    const farmersByPhone = {};
+    (d.farmers||[]).forEach(f=>{ farmersByPhone[f.phone] = f; });
+    const open = (d.listings||[]).filter(l=>l.status==="open" || l.status==="partially_pooled");
+    const byCrop = {};
+    open.forEach(l=>{ byCrop[l.crop_code] = (byCrop[l.crop_code]||0) + (l.quantity_kg - l.quantity_committed_kg); });
+    const top = Object.entries(byCrop).sort((a,b)=>b[1]-a[1])[0];
+    const cropOf = code => CROPS[CROP_CODE_MAP[code]] || {ne:code, en:code, ic:"🌾"};
+    return `<div class="stack">
+    <div class="kpi">
+      ${Object.entries(byCrop).map(([code,kg])=>{const c=cropOf(code);
+        return `<div><b>${esc(T(c.ne,c.en))}</b><i>${esc(N(kg))} ${esc(T("के.जी.","kg"))}</i></div>`}).join("") || `<div><b>${esc(T("खुला प्रस्ताव","Open listings"))}</b><i>${esc(N(0))} ${esc(T("के.जी.","kg"))}</i></div>`}
+    </div>
+    ${top && top[1] >= 130 ? `<div class="card" style="border-left:7px solid var(--tori);background:var(--tori-soft)">
+      <div class="warn-line" style="font-size:19px">${esc(T(`${cropOf(top[0]).ne} ${N(top[1])} के.जी. पुग्यो — लट बनाउन मिल्छ।`,`${cropOf(top[0]).en} reached ${N(top[1])} kg — a lot can be formed.`))}</div>
+      <div class="warn-sub">${esc(T("लट सर्भरमा आफै बन्छ — १३० के.जी. पुगेपछि।","Lots form automatically on the server once 130 kg is pooled."))}</div>
+    </div>` : ""}
+    <h2 class="sec">${esc(T("खुला प्रस्तावहरू","Open listings"))}</h2>
+    <div class="card" style="padding:0">
+      ${open.length ? open.map(l=>{const c=cropOf(l.crop_code), f=farmersByPhone[l.farmer_phone]||{};
+        const free = l.quantity_kg - l.quantity_committed_kg;
+        return `<div class="item"><div class="em" aria-hidden="true">${c.ic}</div><div class="bd">
+          <b>${esc(f.name || l.farmer_phone)}</b><p>${esc(T(c.ne,c.en))} · ${esc(N(free))} ${esc(T("के.जी. बाँकी","kg uncommitted"))} · ${esc(T("श्रेणी","Grade"))} ${esc(l.grade)}</p></div>
+          <div class="money">${esc(N(l.quantity_kg))} ${esc(T("के.जी.","kg"))}</div></div>`}).join("")
+      : `<div class="empty"><span class="ic">🧺</span><b>${esc(T("अहिले खुला प्रस्ताव छैन","No open listings right now"))}</b></div>`}
+    </div>
+  </div>`;
+  }
   const pool = [
     {n:"सरिता तामाङ", nEn:"Sarita Tamang", crop:"cauliflower", kg:38, w:"धुलिखेल-४", wEn:"Dhulikhel-4"},
     {n:"राम बहादुर के.सी.", nEn:"Ram Bahadur K.C.", crop:"cauliflower", kg:52, w:"पनौती-२", wEn:"Panauti-2"},
@@ -2472,6 +2561,7 @@ function viewPool(){
   const cauliKg = byCrop.cauliflower || 0;
   const lotReady = cauliKg >= 130;
   return `<div class="stack">
+    ${DEMO_BADGE}
     <div class="kpi">
       ${Object.entries(byCrop).map(([k,kg])=>{const c=CROPS[k];
         return `<div><b>${esc(T(c.ne,c.en))}</b><i>${esc(N(kg))} ${esc(T("के.जी.","kg"))}</i></div>`}).join("")}
@@ -2500,6 +2590,7 @@ function viewRoute(){
     ["१०:००","10:00","कालीमाटी / खरिदकर्ता","Kalimati / buyers","सम्पूर्ण लट बुझाउने","Hand over full lot"]
   ];
   return `<div class="stack">
+    ${DEMO_BADGE}
     <div class="card" style="border-left:7px solid var(--paddy)">
       <div class="warn-line" style="font-size:19px">${esc(T("बुधबारको संकलन बाटो","Wednesday collection route"))}</div>
       <div class="warn-sub">${esc(T("४२ कि.मि. · ५ बिसौनी · अनुमानित ३ घण्टा ३० मिनेट","42 km · 5 stops · about 3 hr 30 min"))}</div>
@@ -2519,9 +2610,56 @@ function viewRoute(){
 }
 
 function viewBoard(){
+  const d = coopData();
+  if(d){
+    if(isStale(trendsCache, 120000)) refreshOnce("trends", ()=>trendsCache.data, fetchTrends);
+    const byMonth = {};
+    (d.orders||[]).forEach(o=>{
+      const m = (o.created_at||"").slice(0,7);
+      if(m) byMonth[m] = (byMonth[m]||0) + (o.quantity_kg||0);
+    });
+    const months = Object.keys(byMonth).sort().slice(-4).reverse();
+    const max = Math.max(1, ...months.map(m=>byMonth[m]));
+    const MON_NE = ["जनवरी","फेब्रुअरी","मार्च","अप्रिल","मे","जुन","जुलाइ","अगस्ट","सेप्टेम्बर","अक्टोबर","नोभेम्बर","डिसेम्बर"];
+    const MON_EN = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const mLabel = m => { const p = m.split("-"); return T(`${MON_NE[+p[1]-1]} ${p[0]}`, `${MON_EN[+p[1]-1]} ${p[0]}`); };
+    const thisMonth = new Date().toISOString().slice(0,7);
+    let mover = null;
+    for(const [code, pts] of Object.entries(trendsCache.data || {})){
+      if(pts && pts.length >= 2 && pts[0].avg_rate){
+        const pct = (pts[pts.length-1].avg_rate - pts[0].avg_rate) / pts[0].avg_rate * 100;
+        if(!mover || Math.abs(pct) > Math.abs(mover.pct)) mover = {code, pct};
+      }
+    }
+    const moverCrop = mover ? (CROPS[CROP_CODE_MAP[mover.code]] || {ne:mover.code, en:mover.code}) : null;
+    return `<div class="stack">
+    <div class="kpi">
+      <div><b>${esc(T("यो महिना बिक्री","Sold this month"))}</b><i>${esc(N(byMonth[thisMonth]||0))} ${esc(T("के.जी.","kg"))}</i></div>
+      <div><b>${esc(T("दर्ता भएका किसान","Registered farmers"))}</b><i>${esc(N((d.counts||{}).farmers||0))}</i></div>
+    </div>
+    <h2 class="sec">${esc(T("महिनावारी बिक्री (वास्तविक अर्डर)","Monthly volume (real orders)"))}</h2>
+    <div class="card">
+      ${months.length ? months.map(m=>`<div style="margin-bottom:13px">
+        <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;margin-bottom:5px">
+          <span>${esc(mLabel(m))}</span><span>${esc(N(byMonth[m]))} ${esc(T("के.जी.","kg"))}</span></div>
+        <div style="height:11px;background:var(--line);border-radius:99px;overflow:hidden">
+          <div style="height:100%;width:${(byMonth[m]/max*100).toFixed(0)}%;background:var(--paddy);border-radius:99px"></div></div>
+      </div>`).join("") : `<div class="empty"><b>${esc(T("अहिलेसम्म अर्डर डेटा छैन","No order data yet"))}</b></div>`}
+    </div>
+    <div class="card" style="border-left:7px solid var(--soil)">
+      <div class="lbl">${esc(T("ध्यान दिनुपर्ने","Worth watching"))}</div>
+      <p style="font-size:15px;color:var(--ink-2)">${esc(mover
+        ? T(`${moverCrop.ne}को भाउ ३० दिनमा ${N(Math.abs(mover.pct).toFixed(1))}% ${mover.pct>=0?"बढ्यो":"घट्यो"} (वास्तविक ट्रेन्ड डेटा)।`,
+            `${moverCrop.en} rates ${mover.pct>=0?"rose":"fell"} ${Math.abs(mover.pct).toFixed(1)}% over 30 days (real trend data).`)
+        : T("मूल्य ट्रेन्डका लागि अझै पर्याप्त डेटा जम्मा भएको छैन।",
+            "Not enough price history yet for a trend insight."))}</p>
+    </div>
+  </div>`;
+  }
   const rows = [["असोज","Asoj",2840,178],["भदौ","Bhadau",2210,164],["साउन","Shrawan",1680,151],["असार","Asar",1430,146]];
   const max = Math.max(...rows.map(r=>r[2]));
   return `<div class="stack">
+    ${DEMO_BADGE}
     <div class="kpi">
       <div><b>${esc(T("यो महिना बिक्री","Sold this month"))}</b><i>${esc(N(2840))} ${esc(T("के.जी.","kg"))}</i></div>
       <div><b>${esc(T("सक्रिय किसान","Active farmers"))}</b><i>${esc(N(178))}</i></div>
@@ -2928,7 +3066,7 @@ document.addEventListener("click", e=>{
     decideOffer(t.dataset.counterOffer, "countered", v); return;
   }
   if(t.id==="orderBtn"){ doPlaceOrder(); return; }
-  if(t.id==="lotBtn"){ toast(T("लट KVR-११९ बन्यो · ४ किसान","Lot KVR-119 formed · 4 farmers")); return; }
+  if(t.id==="lotBtn"){ toast(T("नमुना मात्र — वास्तविक लट १३० के.जी. पुगेपछि सर्भरमा आफै बन्छ","Demo only — real lots form automatically on the server at 130 kg")); return; }
   if(t.id==="resetBtn"){
     S.offers=[]; S.cart={}; render(); toast(T("मेटियो","Cleared")); return;
   }

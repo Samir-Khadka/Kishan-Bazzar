@@ -26,6 +26,15 @@ function applyLang(){
 document.addEventListener("DOMContentLoaded", ()=>{
   applyLang();
   loadStats();
+  // Keep the mobile menu button's aria-expanded in sync with the nav
+  // it controls (the inline onclick toggles .open; this mirrors state).
+  const menuBtn = document.querySelector(".menu-btn");
+  const mainNav = document.getElementById("main-nav");
+  if(menuBtn && mainNav){
+    menuBtn.addEventListener("click", ()=>{
+      menuBtn.setAttribute("aria-expanded", mainNav.classList.contains("open") ? "true" : "false");
+    });
+  }
 });
 
 async function api(path){

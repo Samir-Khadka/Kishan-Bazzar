@@ -56,7 +56,30 @@ def check_and_form_lot(conn, coop_id, crop_code, grade, target_kg):
     Returns the lot dict if a new lot was formed this call, else None.
     Partial pooling (threshold not yet reached) just leaves listings as
     'open' — nothing to return, nothing to notify yet.
+
+    The whole read-modify-write runs under BEGIN IMMEDIATE when the
+    caller isn't already holding a transaction: two listings landing
+    in the same instant used to both see the same uncommitted kilos,
+    both decide the threshold was crossed, and double-commit them
+    until the listings CHECK constraint turned the second one into a
+    500. Under the write lock the second caller re-reads the first
+    caller's committed state and correctly sees the pool as drained.
     """
+    started_here = not conn.in_transaction
+    if started_here:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        result = _form_lot_locked(conn, coop_id, crop_code, grade, target_kg)
+    except Exception:
+        if started_here:
+            conn.rollback()
+        raise
+    if started_here:
+        conn.commit()
+    return result
+
+
+def _form_lot_locked(conn, coop_id, crop_code, grade, target_kg):
     available = open_listings_in_radius(conn, coop_id, crop_code, grade)
     pooled_so_far = sum(r["quantity_kg"] - r["quantity_committed_kg"] for r in available)
     if pooled_so_far < target_kg:
@@ -105,9 +128,16 @@ def check_and_form_lot(conn, coop_id, crop_code, grade, target_kg):
 
 def _next_lot_code(conn, coop_id):
     """Human-readable lot codes like the prototype's 'KVR-118' — a short
-    prefix derived from the co-op id plus a running count for that co-op."""
+    prefix derived from the co-op id plus a running count for that co-op.
+    COUNT(*) alone can name a code that already exists (a deleted lot
+    leaves a gap the count reuses), so walk upward from the count until
+    the code is actually free — callers hold the write lock, so the
+    check can't race."""
     prefix = "".join(ch for ch in coop_id.upper() if ch.isalpha())[:3] or "LOT"
     count = conn.execute(
         "SELECT COUNT(*) AS n FROM lots WHERE coop_id=?", (coop_id,)
     ).fetchone()["n"]
-    return f"{prefix}-{100 + count + 1}"
+    n = 100 + count + 1
+    while conn.execute("SELECT 1 FROM lots WHERE id=?", (f"{prefix}-{n}",)).fetchone():
+        n += 1
+    return f"{prefix}-{n}"

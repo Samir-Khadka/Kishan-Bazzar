@@ -27,8 +27,11 @@ Design notes for future maintainers:
 """
 
 import re
+import sys
 import time
 from collections import defaultdict
+
+import repositories
 
 # Agronomic knowledge (pest/disease remedies, fertilizer schedules, sowing
 # windows) lives in ai_advisor.py — imported here so the chat NLU can serve
@@ -406,13 +409,19 @@ def _price(_t, lang, crops, _ctx, db_conn, _farmer, conf):
                            f"{ic} {name}: ahile bhau upalabdha chhaina.",
                            f"{ic} {name}: no price available right now.", lang))
             continue
-        arrow = "📈" if chg and chg > 0 else "📉" if chg and chg < 0 else "➡️"
-        dirn = T("बढेको", "badheko", "up", lang) if chg and chg > 0 else \
-               T("घटेको", "ghateko", "down", lang) if chg and chg < 0 else \
-               T("स्थिर", "sthir", "steady", lang)
-        lines.append(T(f"{ic} {name}: रू {rate}/के.जी. ({dirn} {arrow})",
-                       f"{ic} {name}: Rs {rate}/kg ({dirn} {arrow})",
-                       f"{ic} {name}: Rs {rate}/kg ({dirn} {arrow})", lang))
+        if chg is None:
+            # No earlier recorded rate — state the price, claim no trend.
+            lines.append(T(f"{ic} {name}: रू {rate}/के.जी.",
+                           f"{ic} {name}: Rs {rate}/kg.",
+                           f"{ic} {name}: Rs {rate}/kg.", lang))
+        else:
+            arrow = "📈" if chg > 0 else "📉" if chg < 0 else "➡️"
+            dirn = T("बढेको", "badheko", "up", lang) if chg > 0 else \
+                   T("घटेको", "ghateko", "down", lang) if chg < 0 else \
+                   T("स्थिर", "sthir", "steady", lang)
+            lines.append(T(f"{ic} {name}: रू {rate}/के.जी. ({dirn} {arrow})",
+                           f"{ic} {name}: Rs {rate}/kg ({dirn} {arrow})",
+                           f"{ic} {name}: Rs {rate}/kg ({dirn} {arrow})", lang))
         cards.append({"type": "price", "crop": code, "name": name,
                       "rate": rate, "change": chg, "icon": ic})
     others = [c for c in CROPS if c not in crops][:2]
@@ -434,32 +443,42 @@ DB_CROP_CODE = {
 
 
 def _get_price(db_conn, crop_code):
-    """(rate, change) — latest confirmed lot rate, else latest listing rate."""
+    """(rate, change_pct) — the latest confirmed lot rate for the crop,
+    and its % change vs the previous recorded rate.
+
+    change_pct is None when there is no earlier rate to compare
+    against: the reply then states the rate with NO trend claim,
+    instead of the old behaviour — change hardcoded to 0, so every
+    price was confidently labelled "steady", and a fallback query
+    naming a column that doesn't exist (listings.rate_per_kg; rates
+    live on lots) that could never fire. Prices here are real or
+    absent, never decorated with an invented direction."""
     if db_conn is None:
         return None, None
     db_code = DB_CROP_CODE.get(crop_code, crop_code)
     try:
-        row = db_conn.execute(
-            "SELECT rate_per_kg FROM lots WHERE crop_code=? AND rate_per_kg IS NOT NULL "
-            "ORDER BY created_at DESC LIMIT 1", (db_code,)).fetchone()
-        if row:
-            return row["rate_per_kg"], 0
-        row = db_conn.execute(
-            "SELECT rate_per_kg FROM listings WHERE crop_code=? AND rate_per_kg IS NOT NULL "
-            "ORDER BY created_at DESC LIMIT 1", (db_code,)).fetchone()
-        if row:
-            return row["rate_per_kg"], 0
-    except Exception:
-        pass
-    return None, None
+        rates = repositories.recent_lot_rates(db_conn, db_code, limit=2)
+    except Exception as e:
+        print(f"assistant price lookup failed for {db_code}: {e!r}",
+              file=sys.stderr)
+        return None, None
+    if not rates:
+        return None, None
+    rate = rates[0]
+    if len(rates) < 2 or not rates[1]:
+        return rate, None
+    return rate, (rate - rates[1]) / rates[1] * 100.0
 
 
 def _weather(_t, lang, _c, _ctx, _db, _farmer, _conf):
-    # Static demo forecast; a production build calls DHM/Open-Meteo here.
+    # Static SAMPLE forecast until a real feed (DHM/Open-Meteo) is
+    # wired in — and the reply says so, the same way the app's weather
+    # card badges its demo data. A farmer planning around invented
+    # rain is worse than a farmer told "this is sample data".
     return _resp(
-        T("🌤️ आज: घाम लाग्नेछ, २६° — तीन दिनपछि पानी पर्ने सम्भावना। मकै र अदुवा सुकाउने राम्रो मौका।",
-          "🌤️ Aaja: gham lagnechha, 26° — teen din pachhi pani parne sambhawana. Makai ra aduwa sukaune ramro mauka.",
-          "🌤️ Today: sunny, 26° — rain likely in three days. Good window to dry maize and ginger.", lang),
+        T("🌤️ आज: घाम लाग्नेछ, २६° — तीन दिनपछि पानी पर्ने सम्भावना। मकै र अदुवा सुकाउने राम्रो मौका।\nℹ️ यो नमुना पूर्वानुमान हो — वास्तविक मौसम चाँडै जोडिनेछ।",
+          "🌤️ Aaja: gham lagnechha, 26° — teen din pachhi pani parne sambhawana. Makai ra aduwa sukaune ramro mauka.\nℹ️ Yo namuna purbanuman ho — bastabik mausam chandai jodinechha.",
+          "🌤️ Today: sunny, 26° — rain likely in three days. Good window to dry maize and ginger.\nℹ️ This is sample forecast data — a live weather feed is coming soon.", lang),
         chips=[T("भोलिको मौसम?", "Bholiko mausam?", "Tomorrow's weather?", lang),
                T("आजको भाउ", "Aajako bhau", "Today's rates", lang)],
         cards=[{"type": "weather", "today": "26° ☀️",
@@ -499,16 +518,24 @@ def _ledger(_t, lang, _c, _ctx, db_conn, farmer, _conf):
               "Hisab herna login garnuhos — mero tab ma phone number bata code linuhos.",
               "Log in to see your ledger — get a code with your phone number in the Mine tab.", lang),
             chips=[T("लगइन गर्ने", "Login garne", "Log in", lang)])
-    due = 0
+    # The figure comes from repositories.farmer_pending_due — the
+    # prorated listings -> lot_listings -> lots -> orders join. (The
+    # previous inline query named columns that don't exist and hid
+    # the resulting error behind a bare `except: pass`, so every
+    # farmer was told "no pending payments" forever.) A lookup
+    # failure now degrades HONESTLY: the farmer is told the ledger
+    # couldn't be fetched, never that nothing is owed.
     try:
-        if db_conn is not None:
-            rows = db_conn.execute(
-                "SELECT quantity_kg, rate_per_kg FROM orders o JOIN listings l ON o.listing_id=l.id "
-                "WHERE l.farmer_phone=? AND o.status != 'paid'",
-                (farmer["phone"],)).fetchall()
-            due = sum(r["quantity_kg"] * (r["rate_per_kg"] or 0) for r in rows)
-    except Exception:
-        pass
+        if db_conn is None:
+            raise RuntimeError("no db connection")
+        due = repositories.farmer_pending_due(db_conn, farmer["phone"])
+    except Exception as e:
+        print(f"assistant ledger lookup failed: {e!r}", file=sys.stderr)
+        return _resp(
+            T("⚠️ अहिले तपाईंको हिसाब ल्याउन सकिएन। केही बेरपछि फेरि प्रयास गर्नुहोस्, वा सहकारीलाई फोन गर्नुहोस्।",
+              "⚠️ Ahile tapaaiko hisab lyauna sakiena. Kehi berpachhi feri prayas garnuhos, wa sahakarilai phone garnuhos.",
+              "⚠️ I couldn't fetch your ledger right now. Please try again in a little while, or call your co-op.", lang),
+            chips=[T("फेरि प्रयास गर्ने", "Feri prayas garne", "Try again", lang)])
     if due > 0:
         return _resp(
             T(f"💰 तपाईंलाई रू {due:,.0f} आउन बाँकी छ। तौलिएको ४८ घण्टाभित्र भुक्तानी हुन्छ।",

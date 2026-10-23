@@ -186,13 +186,18 @@ console.log("\n=== refreshOnce()/isStale() — background refresh must not re-re
   check("fresh cache: renderPriceTrends() triggers no fetch", trendsCalls === 0, `got ${trendsCalls}`);
   check("fresh cache: still renders the trend section", html1.includes("भाउको ट्रेन्ड"));
 
-  // stale cache: three renders must trigger exactly one fetch, then stop
-  evalInApp("trendsCache = {data: null, at: 0}");
-  trendsCalls = 0;
-  sandbox.fetch = async (url) => { trendsCalls++; throw new Error("no server"); };
+  // stale cache: three renders must trigger exactly one fetch PER
+  // RESOURCE, then stop. (The Today view now reads two resources —
+  // trends and latest rates; the invariant is per-resource dedupe,
+  // i.e. still no render->fetch->render loop.)
+  evalInApp("trendsCache = {data: null, at: 0}; latestCache = {data: null, at: 0}");
+  let allCalls = 0; const perUrl = {};
+  sandbox.fetch = async (url) => { allCalls++; perUrl[String(url)] = (perUrl[String(url)]||0)+1; throw new Error("no server"); };
   A.viewToday(); A.viewToday(); A.viewToday();
   await sleep(100);
-  check("stale cache: three renders trigger exactly one background fetch (no loop)", trendsCalls === 1, `got ${trendsCalls}`);
+  check("stale cache: three renders trigger exactly one background fetch per resource (no loop)",
+        allCalls === 2 && Object.values(perUrl).every(n => n === 1),
+        `got ${allCalls}: ${JSON.stringify(perUrl)}`);
   check("isStale() is false on a just-filled cache", A.isStale({data: {x: 1}, at: Date.now()}, 120000) === false);
   check("isStale() is true when data is null", A.isStale({data: null, at: 0}, 120000) === true);
 

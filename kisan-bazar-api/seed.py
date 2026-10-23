@@ -71,21 +71,41 @@ def seed():
     )
 
     # Demo lots — ready for buyers, matching the frontend demo data shape
-    lots = [
-        ("KVR-118", "kavre-veg", "KAULI", "A", 500, 410, 58, "ready"),
-        ("DHD-207", "kavre-veg", "GOLB", "A", 350, 300, 48, "ready"),
-        ("ILM-044", "kavre-veg", "ALAICHI", "A", 30, 25, 1450, "ready"),
-        ("MST-012", "kavre-veg", "SYAU", "A", 200, 150, 138, "ready"),
-        ("SND-091", "kavre-veg", "JUNAR", "B", 250, 200, 95, "ready"),
-    ]
     conn.executemany(
         "INSERT INTO lots (id, coop_id, crop_code, grade, target_kg, pooled_kg, rate_per_kg, status) "
-        "VALUES (?,?,?,?,?,?,?,?)", lots
+        "VALUES (?,?,?,?,?,?,?,?)", DEMO_LOTS
     )
 
     conn.commit()
     conn.close()
     print("Seeded: 1 co-op, 5 farmers (1 out of collection radius), 1 staff account, 16 crops, 4 rentals, 5 lots.")
+
+
+# The demo lots seed() inserts — also used by app.py's startup
+# migration for databases seeded before lots existed (2026-10-16).
+DEMO_LOTS = [
+    ("KVR-118", "kavre-veg", "KAULI", "A", 500, 410, 58, "ready"),
+    ("DHD-207", "kavre-veg", "GOLB", "A", 350, 300, 48, "ready"),
+    ("ILM-044", "kavre-veg", "ALAICHI", "A", 30, 25, 1450, "ready"),
+    ("MST-012", "kavre-veg", "SYAU", "A", 200, 150, 138, "ready"),
+    ("SND-091", "kavre-veg", "JUNAR", "B", 250, 200, 95, "ready"),
+]
+
+
+def ensure_demo_lots(conn):
+    """Backfill the demo lots if the lots table is empty (and the
+    kavre-veg co-op exists to satisfy the FK). Idempotent."""
+    lot_count = conn.execute("SELECT COUNT(*) AS n FROM lots").fetchone()["n"]
+    if lot_count:
+        return
+    coop_exists = conn.execute(
+        "SELECT 1 FROM cooperatives WHERE id='kavre-veg'").fetchone()
+    if not coop_exists:
+        return
+    conn.executemany(
+        "INSERT OR IGNORE INTO lots (id, coop_id, crop_code, grade, target_kg, pooled_kg, rate_per_kg, status) "
+        "VALUES (?,?,?,?,?,?,?,?)", DEMO_LOTS)
+    conn.commit()
 
 
 if __name__ == "__main__":

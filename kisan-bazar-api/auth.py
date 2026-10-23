@@ -108,6 +108,15 @@ def _hash_code(phone: str, code: str) -> str:
 def create_auth_code(conn, phone: str) -> str:
     code = f"{secrets.randbelow(1_000_000):06d}"
     code_hash = _hash_code(phone, code)
+    # One live code per phone: minting a new code retires every earlier
+    # unconsumed one. Without this, a second request left the first
+    # code valid too — two (rate limit: three) simultaneous chances to
+    # guess, and real confusion about which texted code is current.
+    conn.execute(
+        "UPDATE auth_codes SET consumed_at=datetime('now') "
+        "WHERE phone=? AND consumed_at IS NULL",
+        (phone,),
+    )
     conn.execute(
         "INSERT INTO auth_codes (phone, code_hash, expires_at) "
         "VALUES (?, ?, datetime('now', ?))",
