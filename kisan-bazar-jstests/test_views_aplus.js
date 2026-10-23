@@ -154,6 +154,46 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
         && evalInApp("S.role") === "farmer" && evalInApp("S.tab") === "today");
   check("logout clears the admin cache", evalInApp("adminCache.data") === null);
 
+  console.log("\n=== persistent header logout + admin loading/error states are never dead ends ===");
+  // The header is static markup rendered in EVERY app state (all tabs,
+  // loading, error) — a logout control there can never be trapped
+  // inside an unreachable view the way the panel buttons were.
+  const fs2 = require("fs"), path2 = require("path");
+  const htmlSrc = fs2.readFileSync(path2.join(__dirname, "..", "kisan-bazar.html"), "utf8");
+  const headerBlock = (htmlSrc.match(/<header class="top">[\s\S]*?<\/header>/) || [""])[0];
+  check("always-rendered app header contains a logout control",
+        headerBlock.includes('id="headerLogoutBtn"'));
+
+  // header() toggles that control with the session. Drive it with a
+  // per-id element registry (the harness stub returns a fresh fake
+  // element per call, which can't be read back).
+  const regEls = {};
+  const regEl = () => ({ style: {}, dataset: {}, hidden: false, innerHTML: "",
+    classList: { add(){}, remove(){}, toggle(){}, contains(){ return false; } },
+    setAttribute(){}, getAttribute(){ return null; } });
+  const origDoc = sandbox.document;
+  sandbox.document = { ...origDoc, getElementById: (id) => (regEls[id] || (regEls[id] = regEl())) };
+  A.header(); // session was cleared by the doLogout checks above
+  check("header logout is hidden when logged out", regEls.headerLogoutBtn.hidden === true);
+  setStaff();
+  A.header();
+  check("header logout is visible when a session exists", regEls.headerLogoutBtn.hidden === false);
+  check("header logout carries the Log out label",
+        (regEls.headerLogoutBtn.innerHTML || "").includes("Log out"),
+        regEls.headerLogoutBtn.innerHTML);
+  sandbox.document = origDoc;
+
+  // Defense in depth: the admin panel's own loading/error states (the
+  // "server 401 / Retry" card this bug was reported from) also render
+  // the panel bar with its logout button.
+  evalInApp("adminCache = {data:null, at:0, err:'server 401'}");
+  check("admin ERROR state renders a logout button",
+        A.viewAdminOverview().includes('id="adminLogoutBtn"'));
+  evalInApp("adminCache = {data:null, at:0, err:null}");
+  sandbox.fetch = () => new Promise(() => {}); // never resolves: stays in the loading state
+  check("admin LOADING state renders a logout button",
+        A.viewAdminOverview().includes('id="adminLogoutBtn"'));
+
   A.BACKEND.enabled = false;
   console.log(`\n${passed} passed, ${failed} failed.`);
   process.exit(failed ? 1 : 0);
