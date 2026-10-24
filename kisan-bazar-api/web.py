@@ -10,12 +10,16 @@ invariant — the staff check, in particular, previously existed as
 three hand-rolled copies that had already started to drift.
 """
 import os
+import sqlite3
+import time
+from datetime import datetime
 from functools import wraps
 
 from flask import request, jsonify, g, current_app
 
 import db
 import auth
+import repositories
 
 # Vehicle-load target per lot — in production this comes from the
 # co-op's configured target or a standing buyer commitment, not a
@@ -79,12 +83,168 @@ def require_staff(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         conn = db.get_db()
-        row = conn.execute("SELECT is_staff FROM farmers WHERE phone=?", (g.phone,)).fetchone()
-        conn.close()
-        if not row or not row["is_staff"]:
+        try:
+            is_staff = repositories.farmer_is_staff(conn, g.phone)
+        finally:
+            conn.close()
+        if not is_staff:
             return jsonify({"error": "staff access required"}), 403
         return f(*args, **kwargs)
     return wrapper
+
+
+# A claim row's status_code while its handler is still running. A row in
+# this state must NEVER be replayed — the response body is not stored
+# yet, so replaying it would hand back an empty/partial response.
+_IDEMPOTENT_PENDING = 0
+# A claim older than this is a dead worker's (crash/kill between claim
+# and store): the next duplicate may reclaim the key and run fresh
+# instead of waiting forever on a row that will never complete.
+_IDEMPOTENT_STALE_SECONDS = 300
+# How long a request that loses the claim race waits for the winner to
+# finish before telling the client the operation is still in flight.
+_IDEMPOTENT_WAIT_SECONDS = 10
+
+
+def _idem_lookup(conn, key):
+    return conn.execute(
+        "SELECT status_code, response_body, created_at FROM idempotency_keys "
+        "WHERE key=? AND endpoint=?",
+        (key, request.path),
+    ).fetchone()
+
+
+def _idem_claim_age_seconds(row):
+    try:
+        created = datetime.strptime(row["created_at"], "%Y-%m-%d %H:%M:%S")
+        return (datetime.utcnow() - created).total_seconds()
+    except Exception:
+        return 0.0
+
+
+def _idem_replay(row):
+    return current_app.response_class(
+        response=row["response_body"],
+        status=row["status_code"],
+        mimetype="application/json",
+    )
+
+
+def _idem_claim(key):
+    """Atomically claim an idempotency key for this request.
+
+    Runs under BEGIN IMMEDIATE, so exactly one of two racing requests
+    becomes the winner ('run'); the loser waits for the winner's stored
+    response ('wait') instead of running the handler a second time.
+    Returns one of:
+      ('replay', row)  — a completed response is already stored;
+      ('run',)         — this request owns the claim and must run the handler;
+      ('run-nostore',) — the key is claimed on another endpoint (the
+                         table's PK is on key alone); run the handler
+                         normally without storing, the old behaviour;
+      ('wait',)        — another request holds a live claim; wait for it.
+    """
+    conn = db.get_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        # Lazy cleanup of expired keys (older than 24h).
+        conn.execute(
+            "DELETE FROM idempotency_keys WHERE created_at < datetime('now', '-1 day')"
+        )
+        row = _idem_lookup(conn, key)
+        if row is not None and row["status_code"] != _IDEMPOTENT_PENDING:
+            conn.commit()
+            return "replay", row
+        if row is None:
+            try:
+                conn.execute(
+                    "INSERT INTO idempotency_keys (key, endpoint, status_code, response_body) "
+                    "VALUES (?,?,0,'')",
+                    (key, request.path),
+                )
+            except sqlite3.IntegrityError:
+                # Lost the claim race: either a concurrent same-key claim
+                # (wait for it below) or the key is claimed on another
+                # endpoint (PK is on key alone — run without storing).
+                conn.rollback()
+                row = _idem_lookup(conn, key)
+                if row is not None and row["status_code"] == _IDEMPOTENT_PENDING:
+                    return ("wait",)
+                if row is not None:
+                    return "replay", row
+                return ("run-nostore",)
+            conn.commit()
+            return ("run",)
+        # A pending claim on our endpoint: reclaim it if its worker died.
+        if _idem_claim_age_seconds(row) > _IDEMPOTENT_STALE_SECONDS:
+            conn.execute("DELETE FROM idempotency_keys WHERE key=?", (key,))
+            conn.execute(
+                "INSERT INTO idempotency_keys (key, endpoint, status_code, response_body) "
+                "VALUES (?,?,0,'')",
+                (key, request.path),
+            )
+            conn.commit()
+            return ("run",)
+        conn.commit()
+        return ("wait",)
+    except Exception:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()
+        raise
+    conn.close()
+
+
+def _idem_await_completion(key):
+    """Wait for the claim winner to store its response; the stored row
+    when it completes, else None (caller reports 'still in progress')."""
+    deadline = time.time() + _IDEMPOTENT_WAIT_SECONDS
+    while time.time() < deadline:
+        time.sleep(0.25)
+        conn = db.get_db()
+        try:
+            row = _idem_lookup(conn, key)
+        finally:
+            conn.close()
+        if row is not None and row["status_code"] != _IDEMPOTENT_PENDING:
+            return row
+    return None
+
+
+def _idem_release_claim(key):
+    """Drop a pending claim (the handler raised) so a later retry with
+    the same key runs fresh instead of waiting on a doomed row."""
+    conn = db.get_db()
+    try:
+        conn.execute(
+            "DELETE FROM idempotency_keys WHERE key=? AND endpoint=? AND status_code=0",
+            (key, request.path),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _idem_store(key, resp):
+    if isinstance(resp, tuple):
+        body_resp, status = resp[0], resp[1]
+    else:
+        body_resp, status = resp, 200
+    try:
+        body_text = body_resp.get_data(as_text=True)
+    except Exception:
+        body_text = ""
+    conn = db.get_db()
+    try:
+        conn.execute(
+            "UPDATE idempotency_keys SET status_code=?, response_body=? "
+            "WHERE key=? AND endpoint=? AND status_code=0",
+            (status, body_text, key, request.path),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def idempotent(f):
@@ -94,7 +254,15 @@ def idempotent(f):
     again — a retry after a dropped connection — the original response
     is replayed instead of creating a duplicate. Without the header,
     the request runs normally (backward compatible). Keys expire
-    after 24 hours."""
+    after 24 hours.
+
+    Concurrency: the key is CLAIMED atomically (BEGIN IMMEDIATE) before
+    the handler runs, so two requests racing with the same key cannot
+    both execute the handler — the loser waits for the winner's stored
+    response. Previously the SELECT-then-run check raced: both requests
+    could run the handler (two orders, two listings) and the loser only
+    got the winner's response replayed afterwards.
+    """
     @wraps(f)
     def wrapper(*args, **kwargs):
         key = request.headers.get("Idempotency-Key", "").strip()
@@ -102,63 +270,25 @@ def idempotent(f):
             return f(*args, **kwargs)
         if len(key) > 128:
             return jsonify({"error": "Idempotency-Key too long"}), 400
-        conn = db.get_db()
-        # Lazy cleanup of expired keys (older than 24h). Commit
-        # immediately and close — the connection must NOT stay open
-        # while the handler runs, or its writes will deadlock on the
-        # lock we hold.
-        conn.execute(
-            "DELETE FROM idempotency_keys WHERE created_at < datetime('now', '-1 day')"
-        )
-        conn.commit()
-        row = conn.execute(
-            "SELECT status_code, response_body FROM idempotency_keys WHERE key=? AND endpoint=?",
-            (key, request.path),
-        ).fetchone()
-        conn.close()
-        if row:
-            return current_app.response_class(
-                response=row["response_body"],
-                status=row["status_code"],
-                mimetype="application/json",
-            )
-        # First time: run the handler, then store its response.
-        # Fresh connection — the lookup connection is already closed.
-        resp = f(*args, **kwargs)
-        # Normalize to (body, status) — handlers return jsonify(...)
-        # or (jsonify, code).
-        if isinstance(resp, tuple):
-            body_resp, status = resp[0], resp[1]
-        else:
-            body_resp, status = resp, 200
+        action = _idem_claim(key)
+        if action[0] == "replay":
+            return _idem_replay(action[1])
+        if action[0] == "wait":
+            row = _idem_await_completion(key)
+            if row is not None:
+                return _idem_replay(row)
+            return jsonify(
+                {"error": "duplicate request is still being processed, please retry"}
+            ), 409
+        store = action[0] == "run"
+        # The winner: run the handler, then store its response.
         try:
-            body_text = body_resp.get_data(as_text=True)
+            resp = f(*args, **kwargs)
         except Exception:
-            body_text = ""
-        conn = db.get_db()
-        try:
-            conn.execute(
-                "INSERT INTO idempotency_keys (key, endpoint, status_code, response_body) "
-                "VALUES (?,?,?,?)",
-                (key, request.path, status, body_text),
-            )
-            conn.commit()
-        except Exception:
-            # Race: another worker stored this key first. Replay it.
-            conn.rollback()
-            row = conn.execute(
-                "SELECT status_code, response_body FROM idempotency_keys WHERE key=? AND endpoint=?",
-                (key, request.path),
-            ).fetchone()
-            conn.close()
-            if row:
-                return current_app.response_class(
-                    response=row["response_body"],
-                    status=row["status_code"],
-                    mimetype="application/json",
-                )
-            return resp
-        conn.close()
+            _idem_release_claim(key)
+            raise
+        if store:
+            _idem_store(key, resp)
         return resp
     return wrapper
 
