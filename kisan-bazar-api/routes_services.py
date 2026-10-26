@@ -67,8 +67,13 @@ def book_rental(rental_id):
     quoted a total. The owner confirms (or the farmer cancels) via
     the lifecycle endpoints below; cancelling frees the dates."""
     body = request.get_json(force=True, silent=True) or {}
+    raw_days = body.get("days")
+    # Reject floats/bools outright: int(2.9) used to silently truncate
+    # to 2 days, quoting a total the farmer never asked for.
+    if isinstance(raw_days, (bool, float)):
+        return jsonify({"error": "days must be an integer"}), 400
     try:
-        days = int(body.get("days"))
+        days = int(raw_days)
     except (TypeError, ValueError):
         return jsonify({"error": "days must be an integer"}), 400
     book_date = (body.get("book_date") or "").strip()
@@ -76,9 +81,20 @@ def book_rental(rental_id):
         return jsonify({"error": "days 1-30 and book_date required"}), 400
     from datetime import datetime
     try:
-        datetime.strptime(book_date, "%Y-%m-%d")
+        parsed_date = datetime.strptime(book_date, "%Y-%m-%d").date()
     except ValueError:
         return jsonify({"error": "book_date must be YYYY-MM-DD"}), 400
+    # A booking in the past used to be accepted: the owner was asked
+    # to confirm dates that had already passed, and the dead range
+    # sat in the overlap table. "Today" is measured in Nepal time
+    # (the users' clock), falling back to server-local date.
+    try:
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("Asia/Kathmandu")).date()
+    except Exception:
+        today = datetime.now().date()
+    if parsed_date < today:
+        return jsonify({"error": "book_date cannot be in the past"}), 400
     conn = db.get_db()
     try:
         # Check-and-insert under the write lock, same discipline as

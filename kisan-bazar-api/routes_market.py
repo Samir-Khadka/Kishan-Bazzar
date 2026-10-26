@@ -90,9 +90,11 @@ def list_lots():
     coop_id = request.args.get("coop_id")
     status = request.args.get("status")
     # Pagination: default 50, max 200. Prevents one request from dumping
-    # the entire table as data grows.
+    # the entire table as data grows. The lower bound matters too:
+    # SQLite treats a negative LIMIT as "no limit", so limit=-1 used
+    # to silently bypass the cap and dump the whole table.
     try:
-        limit = min(int(request.args.get("limit", 50)), 200)
+        limit = max(1, min(int(request.args.get("limit", 50)), 200))
         offset = max(int(request.args.get("offset", 0)), 0)
     except ValueError:
         return jsonify({"error": "invalid pagination params"}), 400
@@ -134,20 +136,25 @@ def confirm_lot(lot_id):
         return jsonify({"error": "rate_per_kg must be a positive number"}), 400
 
     conn = db.get_db()
-    lot = repositories.get_lot(conn, lot_id)
-    if not lot:
+    try:
+        # Take the write lock BEFORE reading the lot: the old code
+        # checked status on a pre-lock read, so two staff confirming
+        # the same forming lot at once both passed and the second
+        # silently overwrote the first's rate. Under BEGIN IMMEDIATE
+        # the loser re-reads status='ready' and gets an honest 409.
+        conn.execute("BEGIN IMMEDIATE")
+        lot = repositories.get_lot(conn, lot_id)
+        if not lot:
+            return reject(conn, "lot not found", 404)
+        if lot["status"] != "forming":
+            return reject(conn, f"lot is '{lot['status']}', not 'forming'", 409)
+        conn.execute(
+            "UPDATE lots SET rate_per_kg=?, status='ready' WHERE id=?",
+            (rate, lot_id),
+        )
+        conn.commit()
+    finally:
         conn.close()
-        return jsonify({"error": "lot not found"}), 404
-    if lot["status"] != "forming":
-        conn.close()
-        return jsonify({"error": f"lot is '{lot['status']}', not 'forming'"}), 409
-
-    conn.execute(
-        "UPDATE lots SET rate_per_kg=?, status='ready' WHERE id=?",
-        (rate, lot_id),
-    )
-    conn.commit()
-    conn.close()
     return jsonify({"lot_id": lot_id, "status": "ready", "rate_per_kg": rate})
 
 
