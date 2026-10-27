@@ -72,7 +72,9 @@ const sandbox = {
   crypto: globalThis.crypto,
   // Node's built-in fetch, so the app's own API-client code (apiRequestCode,
   // apiCreateListing, ...) runs unmodified and makes REAL HTTP requests.
-  fetch: globalThis.fetch
+  fetch: globalThis.fetch,
+  // prompt() for the rental-booking flow; tests override sandbox.prompt.
+  prompt: () => null
 };
 vm.createContext(sandbox);
 
@@ -90,7 +92,8 @@ const EXPORT_LIST = [
   "isStale","refreshOnce","renderPriceTrends","viewRental","viewMyOffers","viewAdminOffers",
   "viewAdminOrders","doSettleOrder","fetchCoopRoute","renderRealRoute",
   "viewAdminOverview","viewAdminFarmers","viewAdminLots","viewAdminRates",
-  "doPlaceOrder","doSubmitOffer","trendsCache","rentalsCache","myOffersCache","adminOffersCache"
+  "doPlaceOrder","doSubmitOffer","trendsCache","rentalsCache","myOffersCache","adminOffersCache",
+  "loadLots","doBookRental","nepalDateString","decideOffer","doConfirmLot","doSettleOrder"
 ];
 const combined = appJs + `\n;globalThis.__test = {${EXPORT_LIST.join(",")}};`;
 

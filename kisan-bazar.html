@@ -992,7 +992,12 @@ let lotsLoaded = false;
 async function loadLots(){
   if(!BACKEND.enabled || lotsLoaded) return;
   try{
-    const res = await fetch(`${BACKEND.baseUrl}/v1/lots`);
+    // Ask the server for ready lots only, at the max page size: the
+    // unfiltered default page is 50 lots of ANY status, so ready lots
+    // past the first page never reached the market view at all (the
+    // same page-1 trap fixed on the website in 2026-10-21). Filtering
+    // server-side means the 200 cap counts ready lots, not all lots.
+    const res = await fetch(`${BACKEND.baseUrl}/v1/lots?status=ready&limit=200`);
     if(!res.ok) throw new Error(res.status);
     const payload = await res.json();
     // Paginated response: {data, total, limit, offset}. Unwrap for compat.
@@ -1298,7 +1303,12 @@ function renderPriceTrends(){
   if(isStale(trendsCache, 120000)) refreshOnce("trends", ()=>trendsCache.data, fetchTrends);
   const data = trendsCache.data;
   if(!data || !Object.keys(data).length) return "";
-  const crops = Object.keys(data).slice(0,4);
+  // A malformed series (empty array, or a non-array) used to crash the
+  // whole Today view: pts[0] on an empty array throws inside render(),
+  // blanking the app. Skip unusable series instead — same "corrupt
+  // data must not blank the app" rule as offerRow/viewCart.
+  const crops = Object.keys(data).filter(code => Array.isArray(data[code]) && data[code].length >= 1).slice(0,4);
+  if(!crops.length) return "";
   return `<h2 class="sec">${esc(T("भाउको ट्रेन्ड (३० दिन)","Price trends (30 days)"))}</h2>
   <div class="card" style="margin-bottom:6px">
     ${crops.map(code=>{
@@ -2183,26 +2193,67 @@ function viewRental(){
   </div>`;
 }
 
-async function doBookRental(rentalId){
-  if(!account.token){
-    toast(T("बुक गर्न लगइन गर्नुहोस्","Log in to book"));
-    S.role="farmer"; S.tab="mine"; render(); return;
-  }
-  const days = prompt(T("कति दिन? (1-30)","How many days? (1-30)"), "1");
-  const n = parseInt(days);
-  if(!n || n<1 || n>30) return;
-  const date = prompt(T("मिति (YYYY-MM-DD)","Date (YYYY-MM-DD)"), new Date().toISOString().slice(0,10));
-  if(!date) return;
+// Today's date on the user's clock (Asia/Kathmandu), as YYYY-MM-DD.
+// new Date().toISOString() is UTC, which runs 5h45m behind Nepal: in
+// the early morning it returns YESTERDAY's date, and the backend
+// (correctly) rejects past dates — so the booking prompt's own
+// default used to be unbookable for the first hours of every day.
+function nepalDateString(nowMs){
   try{
-    const res = await fetch(`${BACKEND.baseUrl}/v1/rentals/${rentalId}/book`, {
-      method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${account.token}`},
-      body: JSON.stringify({days:n, book_date:date})
-    });
-    if(checkSession(res)) throw new SessionExpiredError();
-    const data = await res.json().catch(()=>({}));
-    if(!res.ok) throw new Error(data.error || res.status);
-    toast(`${T("बुकिङ भयो!","Booked!")} ${T("जम्मा","Total")}: ${money(data.total)}`);
-  }catch(e){ toast(T("बुक हुन सकेन: ","Booking failed: ")+(e.message||"")); }
+    return new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Kathmandu",
+      year:"numeric", month:"2-digit", day:"2-digit"}).format(new Date(nowMs));
+  }catch(e){
+    const d = new Date(nowMs);
+    const p = n => String(n).padStart(2,"0");
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+  }
+}
+
+let _bookingRental = false;  // guards against double-tap duplicate bookings
+async function doBookRental(rentalId){
+  if(_bookingRental) return;  // already booking — ignore the second tap
+  _bookingRental = true;
+  try{
+    if(!account.token){
+      toast(T("बुक गर्न लगइन गर्नुहोस्","Log in to book"));
+      S.role="farmer"; S.tab="mine"; render(); return;
+    }
+    const daysPrompt = prompt(T("कति दिन? (1-30)","How many days? (1-30)"), "1");
+    if(daysPrompt === null) return;  // cancelled — stay silent, as before
+    const daysRaw = daysPrompt.trim();
+    // Strict integer: parseInt("2.9") silently booked 2 days and
+    // parseInt("10abc") silently booked 10 — the farmer was quoted a
+    // total for days they never asked for. Reject anything that is
+    // not exactly an integer in range instead of guessing.
+    const n = Number(daysRaw);
+    if(!daysRaw || !Number.isInteger(n) || n<1 || n>30){
+      toast(T("१–३० बीचको पूरा दिन लेख्नुहोस्","Enter a whole number of days, 1–30"));
+      return;
+    }
+    const datePrompt = prompt(T("मिति (YYYY-MM-DD)","Date (YYYY-MM-DD)"), nepalDateString(Date.now()));
+    if(datePrompt === null) return;  // cancelled — stay silent, as before
+    const date = datePrompt.trim();
+    // Real calendar date, not just parseable: "2026-02-30" parses to
+    // 2 March in JS but the backend rejects it — fail here, plainly.
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+    const d = m ? new Date(+m[1], +m[2]-1, +m[3]) : null;
+    if(!d || d.getFullYear()!==+m[1] || d.getMonth()!==+m[2]-1 || d.getDate()!==+m[3]){
+      toast(T("मिति YYYY-MM-DD मा लेख्नुहोस्","Enter the date as YYYY-MM-DD"));
+      return;
+    }
+    try{
+      const res = await fetch(`${BACKEND.baseUrl}/v1/rentals/${rentalId}/book`, {
+        method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${account.token}`},
+        body: JSON.stringify({days:n, book_date:date})
+      });
+      if(checkSession(res)) throw new SessionExpiredError();
+      const data = await res.json().catch(()=>({}));
+      if(!res.ok) throw new Error(data.error || res.status);
+      toast(`${T("बुकिङ भयो!","Booked!")} ${T("जम्मा","Total")}: ${money(data.total)}`);
+    }catch(e){ toast(T("बुक हुन सकेन: ","Booking failed: ")+(e.message||"")); }
+  }finally{
+    _bookingRental = false;
+  }
 }
 
 /* ---------------- FARMER: mine ---------------- */
@@ -2389,6 +2440,7 @@ function renderOfferDialog(){
   </div>`;
 }
 
+let _submittingOffer = false;  // guards against double-tap duplicate bids
 async function doSubmitOffer(){
   const d = S.offerDialog;
   if(!d) return;
@@ -2398,6 +2450,13 @@ async function doSubmitOffer(){
     toast(T("भाउ र मात्रा सही लेख्नुहोस्","Enter a valid rate and quantity"));
     return;
   }
+  // The dialog stays open (and its button enabled) until the POST
+  // returns, so a double-tap used to place TWO bids — /v1/offers has
+  // no idempotency key. One in-flight submit per dialog, like the
+  // order double-tap guard in doPlaceOrder.
+  if(_submittingOffer) return;
+  _submittingOffer = true;
+  try{
   // The backend requires the buyer's own token on /v1/offers — bids are
   // bound to the token's phone, so nobody can bid as someone else's number.
   const headers = {"Content-Type": "application/json"};
@@ -2421,6 +2480,9 @@ async function doSubmitOffer(){
     toast(T("अफर पठाइयो! सहकारीको जवाफ पर्खनुहोस्","Offer sent! Waiting for co-op response"));
   }catch(e){
     toast(T("अफर पठाउन सकिएन: ","Could not send offer: ") + (e.message||""));
+  }
+  }finally{
+    _submittingOffer = false;
   }
   render();
 }
@@ -3029,7 +3091,12 @@ function viewAdminOffers(){
   </div>`;
 }
 
+const _decidingOffers = new Set();  // one in-flight decision per offer: a
+// double-tap on Accept/Reject used to fire two POSTs, the second
+// landing as a confusing 409 "already decided" error over the success.
 async function decideOffer(offerId, decision, counterRate){
+  if(_decidingOffers.has(offerId)) return;
+  _decidingOffers.add(offerId);
   try{
     const body = {decision};
     if(decision==="countered") body.counter_rate_per_kg = counterRate;
@@ -3044,6 +3111,7 @@ async function decideOffer(offerId, decision, counterRate){
     adminOffersCache = {data:null, at:0};
     toast(T("फैसला गरियो","Decided"));
   }catch(e){ toast(T("सकिएन: ","Failed: ")+(e.message||"")); }
+  finally{ _decidingOffers.delete(offerId); }
   render({skipScroll:true});
 }
 
@@ -3090,11 +3158,16 @@ function viewAdminOrders(){
   </div>`;
 }
 
+const _settlingOrders = new Set();  // one in-flight settle per order: a
+// double-tap used to fire two POSTs, the second landing as a
+// confusing error over the "Settled" confirmation.
 async function doSettleOrder(orderId){
   const amt = parseFloat((document.getElementById("settle-amt-"+orderId)||{}).value);
   const method = (document.getElementById("settle-method-"+orderId)||{}).value || "cash";
   const reference = ((document.getElementById("settle-ref-"+orderId)||{}).value || "").trim();
   if(!(amt > 0)){ toast(T("सही रकम लेख्नुहोस्","Enter a valid amount")); return; }
+  if(_settlingOrders.has(orderId)) return;
+  _settlingOrders.add(orderId);
   try{
     const body = {amount: amt, method};
     if(reference) body.reference = reference;
@@ -3109,6 +3182,7 @@ async function doSettleOrder(orderId){
     adminCache = {data:null, at:0}; // overview carries the new status
     toast(T("चुक्ता भयो","Settled"));
   }catch(e){ toast(T("सकिएन: ","Failed: ")+(e.message||"")); }
+  finally{ _settlingOrders.delete(orderId); }
   render({skipScroll:true});
 }
 
@@ -3126,10 +3200,15 @@ function viewAdminRates(){
     <div class="card" style="border-left:7px solid var(--line)"><p style="font-size:14px;color:var(--ink-2)">${esc(T("भाउ लट पुष्टि गर्दा तोकिन्छ — 'लट सूची' ट्याब हेर्नुहोस्।","Rates are set when confirming a lot — see the Lots tab."))}</p></div></div>`;
 }
 
+const _confirmingLots = new Set();  // one in-flight confirm per lot: a
+// double-tap used to fire two POSTs, the second landing as a 409 over
+// the "Lot confirmed" toast (the backend now rejects re-confirms).
 async function doConfirmLot(lotId){
   const inp = document.getElementById("rate-"+lotId);
   const rate = parseFloat(inp && inp.value);
   if(!(rate > 0)){ toast(T("सही भाउ लेख्नुहोस्","Enter a valid rate")); return; }
+  if(_confirmingLots.has(lotId)) return;
+  _confirmingLots.add(lotId);
   try{
     const res = await fetch(`${BACKEND.baseUrl}/v1/lots/${encodeURIComponent(lotId)}/confirm`, {
       method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${account.token}`},
@@ -3142,6 +3221,7 @@ async function doConfirmLot(lotId){
     toast(T("लट पुष्टि भयो","Lot confirmed"));
     render({skipScroll:true});
   }catch(e){ toast("⚠️ "+(e.message||"failed")); }
+  finally{ _confirmingLots.delete(lotId); }
 }
 
 /* ---------------- router ---------------- */

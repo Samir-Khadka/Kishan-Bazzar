@@ -289,6 +289,167 @@ console.log("\n=== doSubmitOffer() sends the buyer token when logged in ===");
   A.BACKEND.enabled = false;
 }
 
+console.log("\n=== nepalDateString() + loadLots() pagination (2026-10-27) ===");
+{
+  // Fixed epochs, hand-computed: 2026-10-26 18:45 UTC is 2026-10-27
+  // 00:30 in Kathmandu (+5:45), while 12:00 UTC is 17:45 the same day.
+  // The old code used toISOString() (UTC), so the booking prompt's
+  // default date was yesterday for the first 5h45m of every Nepal day
+  // — and the backend (rightly) rejects past dates.
+  check("18:45 UTC -> next calendar day in Kathmandu",
+        A.nepalDateString(Date.UTC(2026, 9, 26, 18, 45)) === "2026-10-27",
+        A.nepalDateString(Date.UTC(2026, 9, 26, 18, 45)));
+  check("12:00 UTC -> same calendar day in Kathmandu",
+        A.nepalDateString(Date.UTC(2026, 9, 26, 12, 0)) === "2026-10-26",
+        A.nepalDateString(Date.UTC(2026, 9, 26, 12, 0)));
+  check("output is YYYY-MM-DD", /^\d{4}-\d{2}-\d{2}$/.test(A.nepalDateString(Date.now())));
+
+  // loadLots must ask the server for ready lots at max page size:
+  // the old bare /v1/lots defaulted to 50 lots of ANY status, so
+  // ready lots past the first page never reached the market view.
+  A.BACKEND.enabled = true;
+  A.BACKEND.baseUrl = "http://127.0.0.1:9";
+  evalInApp("lotsLoaded = false");
+  let lotsUrl = null;
+  sandbox.fetch = async (url) => {
+    lotsUrl = String(url);
+    return {ok: true, json: async () => ({data: [
+      {id: "LIVE-1", crop_code: "GOLB", status: "ready", pooled_kg: 100, rate_per_kg: 50, coop_name: "Co-op", farmer_count: 3}
+    ], total: 1, limit: 200, offset: 0})};
+  };
+  await A.loadLots();
+  check("loadLots requests status=ready", lotsUrl && lotsUrl.includes("status=ready"), lotsUrl);
+  check("loadLots requests limit=200 (server max)", lotsUrl && lotsUrl.includes("limit=200"), lotsUrl);
+  check("live lot lands in LOTS", (() => { try { return evalInApp("LOTS").some(l => l.id === "LIVE-1"); } catch { return false; } })());
+  lotsUrl = null;
+  await A.loadLots();
+  check("second loadLots() while loaded triggers no fetch", lotsUrl === null);
+
+  // renderPriceTrends must survive malformed trend series instead of
+  // crashing the whole Today view (see the guard above).
+  evalInApp("L = 'en'");
+  evalInApp("trendsCache = {data: {GOLB: [], KAULI: 'nope', ALU: [{avg_rate: 40}]}, at: Date.now()}");
+  let trendHtml = null, trendThrew = false;
+  try { trendHtml = A.renderPriceTrends(); } catch (e) { trendThrew = true; }
+  check("malformed trend series do not throw", !trendThrew);
+  check("malformed series are skipped, usable ones still render",
+        trendHtml && trendHtml.includes("Potato"), trendHtml ? trendHtml.slice(0, 80) : "null");
+  evalInApp("trendsCache = {data: {GOLB: []}, at: Date.now()}");
+  check("all-malformed trends render nothing instead of crashing", A.renderPriceTrends() === "");
+  evalInApp("L = 'ne'");
+  A.BACKEND.enabled = false;
+}
+
+console.log("\n=== doBookRental() days/date validation + double-tap guard (2026-10-27) ===");
+{
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  A.BACKEND.enabled = true;
+  A.BACKEND.baseUrl = "http://127.0.0.1:9";
+  Object.assign(A.account, {token: "t", role: "farmer", phone: "9841000001"});
+  let fetchCalls = 0, lastBody = null, promptCalls = 0, promptDefaults = [];
+  let answers = [];
+  sandbox.prompt = (msg, def) => { promptCalls++; promptDefaults.push(def); return answers.length ? answers.shift() : null; };
+  sandbox.fetch = async (url, opts) => {
+    fetchCalls++; lastBody = JSON.parse(opts.body);
+    await sleep(30);
+    return {ok: true, json: async () => ({total: 4500})};
+  };
+  const reset = () => { fetchCalls = 0; lastBody = null; promptCalls = 0; promptDefaults = []; };
+
+  answers = ["2.9"]; reset();
+  await A.doBookRental("r1");
+  check("fractional days '2.9' are rejected, not truncated to 2", fetchCalls === 0, `fetchCalls=${fetchCalls}`);
+  answers = ["10abc"]; reset();
+  await A.doBookRental("r1");
+  check("trailing-junk days '10abc' are rejected, not parsed as 10", fetchCalls === 0, `fetchCalls=${fetchCalls}`);
+  answers = ["3", "2026-02-30"]; reset();
+  await A.doBookRental("r1");
+  check("impossible date 2026-02-30 is rejected before any fetch", fetchCalls === 0, `fetchCalls=${fetchCalls}`);
+  answers = [null]; reset();
+  await A.doBookRental("r1");
+  check("cancelling the days prompt stays silent (no fetch, no throw)", fetchCalls === 0);
+  answers = ["3", "2026-12-01"]; reset();
+  await A.doBookRental("r1");
+  check("valid booking posts days as an integer", lastBody && lastBody.days === 3 && Number.isInteger(lastBody.days), JSON.stringify(lastBody));
+  check("valid booking posts the entered date", lastBody && lastBody.book_date === "2026-12-01", JSON.stringify(lastBody));
+  check("date prompt default is the Kathmandu date, not UTC",
+        promptDefaults[1] === A.nepalDateString(Date.now()), `default=${promptDefaults[1]}`);
+
+  // Double-tap: two concurrent calls share one prompt round and one POST.
+  answers = ["2", "2026-12-02"]; reset();
+  const p1 = A.doBookRental("r1"), p2 = A.doBookRental("r1");
+  await Promise.all([p1, p2]);
+  check("concurrent double-tap books exactly once", fetchCalls === 1, `fetchCalls=${fetchCalls}`);
+  check("concurrent double-tap prompts only once (2 prompts, not 4)", promptCalls === 2, `promptCalls=${promptCalls}`);
+  A.BACKEND.enabled = false;
+}
+
+console.log("\n=== double-tap guards: doSubmitOffer / decideOffer / doConfirmLot / doSettleOrder (2026-10-27) ===");
+{
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  A.BACKEND.enabled = true;
+  A.BACKEND.baseUrl = "http://127.0.0.1:9";
+  Object.assign(A.account, {token: "tok123", role: "buyer", phone: "9841000001", name: "Buyer"});
+  const realGet = sandbox.document.getElementById;
+
+  // Offer submit: two concurrent submits must place ONE bid (no
+  // idempotency key exists on /v1/offers, so the guard is the only
+  // thing stopping a duplicate bid).
+  evalInApp("S.offerDialog = {lotId: 'L1', rate: 55, qty: 10}");
+  sandbox.document.getElementById = (id) =>
+    id === "offerRate" ? {value: "55"} : id === "offerQty" ? {value: "10"} : realGet(id);
+  let offerCalls = 0;
+  // Count ONLY the offer POST: render() also fires background trend/
+  // latest fetches, and a catch-all stub would both miscount and
+  // poison the trends cache with the offer payload.
+  sandbox.fetch = async (url) => {
+    if (!String(url).includes("/v1/offers")) throw new Error("no server");
+    offerCalls++; await sleep(40); return {ok: true, json: async () => ({offer_id: 7})};
+  };
+  await Promise.all([A.doSubmitOffer(), A.doSubmitOffer()]);
+  check("concurrent double-tap submits exactly one offer", offerCalls === 1, `offerCalls=${offerCalls}`);
+  check("offer dialog still closes after the guarded submit", evalInApp("S.offerDialog") === null);
+  sandbox.document.getElementById = realGet;
+
+  // Staff decide: same offer decided once; a different offer is NOT
+  // blocked by the first offer's guard (per-offer, not global).
+  Object.assign(A.account, {token: "staff-tok", role: "staff"});
+  let decideCalls = 0;
+  sandbox.fetch = async (url) => {
+    if (!String(url).includes("/decide")) throw new Error("no server");
+    decideCalls++; await sleep(40); return {ok: true, json: async () => ({})};
+  };
+  await Promise.all([A.decideOffer(9, "accepted"), A.decideOffer(9, "accepted")]);
+  check("concurrent double-tap decides the offer exactly once", decideCalls === 1, `decideCalls=${decideCalls}`);
+  await A.decideOffer(11, "rejected");
+  check("a different offer is not blocked by the first guard", decideCalls === 2, `decideCalls=${decideCalls}`);
+
+  // Lot confirm: same lot confirmed once.
+  sandbox.document.getElementById = (id) => id === "rate-L9" ? {value: "60"} : realGet(id);
+  let confirmCalls = 0;
+  sandbox.fetch = async (url) => {
+    if (!String(url).includes("/confirm")) throw new Error("no server");
+    confirmCalls++; await sleep(40); return {ok: true, json: async () => ({})};
+  };
+  await Promise.all([A.doConfirmLot("L9"), A.doConfirmLot("L9")]);
+  check("concurrent double-tap confirms the lot exactly once", confirmCalls === 1, `confirmCalls=${confirmCalls}`);
+  sandbox.document.getElementById = realGet;
+
+  // Settle: same order settled once.
+  sandbox.document.getElementById = (id) =>
+    id === "settle-amt-O1" ? {value: "500"} : id === "settle-method-O1" ? {value: "cash"} :
+    id === "settle-ref-O1" ? {value: ""} : realGet(id);
+  let settleCalls = 0;
+  sandbox.fetch = async (url) => {
+    if (!String(url).includes("/settle")) throw new Error("no server");
+    settleCalls++; await sleep(40); return {ok: true, json: async () => ({})};
+  };
+  await Promise.all([A.doSettleOrder("O1"), A.doSettleOrder("O1")]);
+  check("concurrent double-tap settles the order exactly once", settleCalls === 1, `settleCalls=${settleCalls}`);
+  sandbox.document.getElementById = realGet;
+  A.BACKEND.enabled = false;
+}
+
 console.log(`\n${passed} passed, ${failures} failed.`);
 process.exit(failures > 0 ? 1 : 0);
 })();
