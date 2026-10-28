@@ -12,5 +12,14 @@ services:
         value: "1"
       - key: KISAN_BAZAR_ALLOWED_ORIGINS
         value: ""
+      # Optional real-SMS delivery via the Messaging API
+      # (github.com/Samir-Khadka/messaging-api). Leave empty to keep
+      # the demo mock-SMS behaviour; set both to send real OTP texts.
+      - key: KISAN_MESSAGING_API_URL
+        value: ""
+      - key: KISAN_MESSAGING_API_KEY
+        value: ""
+      - key: KISAN_MESSAGING_CHANNEL
+        value: "sms"
       - key: PYTHON_VERSION
         value: "3.11.0"

@@ -8,6 +8,7 @@ from flask import Blueprint, current_app, g, jsonify, request
 
 import auth
 import db
+import messaging
 import repositories
 from web import DEMO_MODE, require_auth, require_self
 
@@ -33,7 +34,7 @@ def request_code():
     # sees it. SMS-spam is bounded by the rate limit above.
     # The response is identical either way — no phone-number enumeration.
     conn = db.get_db()
-    auth.create_auth_code(conn, phone)
+    code = auth.create_auth_code(conn, phone)
     conn.close()
     # NEVER log the code itself — server logs (Render's log stream
     # included) are readable by anyone with dashboard access, and a
@@ -42,7 +43,17 @@ def request_code():
     # mode the code is retrievable via /v1/dev/latest-code instead.
     import sys
     masked = phone[:4] + "•••" + phone[-2:] if len(phone) >= 6 else "•••"
-    sys.stderr.write(f"\n🔔 [SMS GATEWAY MOCK] OTP issued for {masked} (code not logged)\n")
+    if messaging.messaging_enabled():
+        # Real delivery via the Messaging API (see messaging.py). The
+        # code stays minted/verified locally; this is transport only.
+        # Fail CLOSED: a configured gateway that fails must not pretend
+        # a code was sent. The local code stays valid but undelivered;
+        # the user retries and the retry supersedes it.
+        if not messaging.send_otp(phone, code):
+            return jsonify({"error": "could not send code, try again"}), 502
+        sys.stderr.write(f"\n🔔 [SMS GATEWAY] OTP sent via messaging API for {masked} (code not logged)\n")
+    else:
+        sys.stderr.write(f"\n🔔 [SMS GATEWAY MOCK] OTP issued for {masked} (code not logged)\n")
     sys.stderr.flush()
     return jsonify({"message": "if this number is registered, a code has been sent"})
 

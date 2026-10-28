@@ -162,3 +162,23 @@ SMS outbox mirrored to a file, for the integration test in
 
 Seed data now includes all 16 crops the app offers, using the same short
 codes as the app and the SMS/USSD system.
+
+## Real SMS via the Messaging API (optional)
+
+By default OTP codes go to the in-memory dev outbox (mock SMS) and the
+public demo reads them via `/v1/dev/latest-code` in demo mode. To send
+real SMS instead, deploy the separate Messaging API service
+(https://github.com/Samir-Khadka/messaging-api) with a real provider
+(Twilio or Meta), then set on this service:
+
+```bash
+export KISAN_MESSAGING_API_URL="https://your-messaging-api.example"
+export KISAN_MESSAGING_API_KEY="your-messaging-api-key"
+export KISAN_MESSAGING_CHANNEL="sms"   # optional, default sms
+```
+
+With those set, `/v1/auth/request-code` sends the locally minted code
+through the Messaging API; verification, tokens, and rate limits stay
+exactly as before. If the gateway call fails, request-code answers 502
+instead of claiming a code was sent. With them unset, behaviour is
+unchanged — the integration is purely opt-in.
