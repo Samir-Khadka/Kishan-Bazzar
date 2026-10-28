@@ -43,7 +43,13 @@
 <script src="chat.js"></script>
 <script>
 let lotData = null;
+let lotFailed = false;
 const lotId = new URLSearchParams(location.search).get("id");
+
+function escHtml(s){
+  return String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
 
 function langNe(){ return (localStorage.getItem("kb-lang")||"ne")==="ne"; }
 
@@ -61,26 +67,32 @@ function renderLotDetail(){
   const notFound = ne ? "लट भेटिएन।" : "Lot not found.";
   const l = lotData;
   if(!lotId || (lotData === false)){ box.innerHTML = `<p>${notFound}</p>`; return; }
+  // A failed fetch used to re-render as "Loading…" on every language
+  // toggle (lotData stayed null, with no refetch) — a dead end. The
+  // failure is now sticky and re-renders in the current language.
+  if(lotFailed){ box.innerHTML = `<p>${ne?"लोड हुन सकेन।":"Could not load."}</p>`; return; }
   if(!l){ box.innerHTML = `<p class="muted">${ne?"लोड हुँदैछ…":"Loading…"}</p>`; return; }
   const name = ne ? (CROP_NE[l.crop_code]||l.crop_code) : (CROP_EN[l.crop_code]||l.crop_code);
   document.title = `${name} ${ne?"— किसान बजार":"— Kisan Bazar"}`;
+  // Escape server strings (co-op name, lot code, grade) like
+  // account.html does — lot.html previously interpolated them raw.
   box.innerHTML = `
     <p><a href="market.html">← ${ne?"बजार":"Market"}</a></p>
     <div class="card" style="margin-top:16px; display:flex; gap:24px; align-items:center; flex-wrap:wrap">
       <div style="font-size:84px">${CROP_ICON[l.crop_code]||"🌾"}</div>
       <div style="flex:1; min-width:240px">
-        <h1 style="font-size:32px; color:var(--paddy-deep)">${name}</h1>
-        <p class="muted">${l.pooled_kg} kg ${ne?"उपलब्ध":"available"} · ${ne?"ग्रेड":"Grade"} ${l.grade||"A"}</p>
-        <p style="font-size:28px; font-weight:800; color:var(--paddy-deep); margin:12px 0">रू ${l.rate_per_kg||"—"} <small style="font-size:15px; font-weight:600; color:var(--ink-2)">${ne?"प्रति के.जी.":"per kg"}</small></p>
+        <h1 style="font-size:32px; color:var(--paddy-deep)">${escHtml(name)}</h1>
+        <p class="muted">${escHtml(l.pooled_kg)} kg ${ne?"उपलब्ध":"available"} · ${ne?"ग्रेड":"Grade"} ${escHtml(l.grade||"A")}</p>
+        <p style="font-size:28px; font-weight:800; color:var(--paddy-deep); margin:12px 0">रू ${escHtml(l.rate_per_kg||"—")} <small style="font-size:15px; font-weight:600; color:var(--ink-2)">${ne?"प्रति के.जी.":"per kg"}</small></p>
         <a class="btn-primary big" href="/app">${ne?"एपमा मोलतोल / अर्डर गर्नुहोस्":"Negotiate / order in the app"}</a>
       </div>
     </div>
     <div class="prose" style="padding-left:0">
       <h2>${ne?"विवरण":"Details"}</h2>
       <ul>
-        <li>${ne?"लट कोड":"Lot code"}: <b>${l.id}</b></li>
-        <li>${ne?"अवस्था":"Status"}: ${statusLabel(l.status)}</li>
-        <li>${ne?"सहकारी":"Co-op"}: ${l.coop_name || l.coop_id}</li>
+        <li>${ne?"लट कोड":"Lot code"}: <b>${escHtml(l.id)}</b></li>
+        <li>${ne?"अवस्था":"Status"}: ${escHtml(statusLabel(l.status))}</li>
+        <li>${ne?"सहकारी":"Co-op"}: ${escHtml(l.coop_name || l.coop_id)}</li>
       </ul>
     </div>`;
 }
@@ -95,9 +107,9 @@ function renderLotDetail(){
     if(!r.ok) throw new Error(r.status);
     lotData = await r.json();
     renderLotDetail();
-  }catch(e){ 
-    const box = document.getElementById("lot-detail");
-    box.innerHTML = `<p>${langNe()?"लोड हुन सकेन।":"Could not load."}</p>`;
+  }catch(e){
+    lotFailed = true;
+    renderLotDetail();
   }
 })();
 </script>

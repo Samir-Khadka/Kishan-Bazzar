@@ -120,8 +120,17 @@
     addMsg(text, "user");
     const typing = addMsg("…", "bot typing");
     try{
+      // Personal answers (ledger, orders) need the caller's token: the
+      // backend personalizes only when a valid bearer <redacted> arrives.
+      // The website session lives under the kbw: keys (site.js webToken)
+      // — never the app's kb: keys — so a signed-in website user gets
+      // their own answers instead of a "log in" prompt. Anonymous
+      // visitors simply send no header, as before.
+      const headers = {"Content-Type":"application/json"};
+      const tok = (typeof webToken === "function") ? webToken() : null;
+      if(tok) headers["Authorization"] = "Bearer " + tok;
       const r = await fetch(API + "/v1/assistant/chat", {
-        method:"POST", headers:{"Content-Type":"application/json"},
+        method:"POST", headers,
         body: JSON.stringify({message: text, session_id: sessionId})
       });
       const d = await r.json();

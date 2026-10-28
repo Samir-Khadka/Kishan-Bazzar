@@ -311,6 +311,55 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
           ctx.sandbox.window.location.href);
   }
 
+  console.log("\n=== account page: concurrent loadAccount() calls share one load (2026-10-28) ===");
+  {
+    const counts = { me: 0, listings: 0, orders: 0 };
+    const fetchImpl = async (url, opts = {}) => {
+      const u = String(url);
+      if (u.includes("/v1/me")) { counts.me++; return { ok: true, status: 200, json: async () => ({ phone: "9841000001", name: "Sarita Tamang", role: "farmer", coop_id: "kavre-veg", isStaff: false }) }; }
+      if (u.includes("/v1/listings/mine")) { counts.listings++; return { ok: true, status: 200, json: async () => ([]) }; }
+      if (u.includes("/v1/orders/mine")) { counts.orders++; return { ok: true, status: 200, json: async () => ([]) }; }
+      throw new Error("unexpected fetch " + u);
+    };
+    const ctx = makeContext({
+      fetchImpl,
+      storage: { "kbw:accountToken": JSON.stringify("tok-website"), "kbw:accountPhone": JSON.stringify("9841000001") }
+    });
+    for (const s of inlineScripts(accountHtml)) vm.runInContext(s, ctx.sandbox, { filename: "account-inline.js" });
+    // The DOMContentLoaded second call: site.js applyLang() invokes
+    // loadAccount() again while the script-load call is still in flight.
+    run(ctx, "loadAccount()");
+    await sleep(30);
+    check("script-load + DOMContentLoaded calls fetch /v1/me exactly once",
+          counts.me === 1, JSON.stringify(counts));
+    check("script-load + DOMContentLoaded calls fetch /v1/listings/mine exactly once",
+          counts.listings === 1, JSON.stringify(counts));
+    check("script-load + DOMContentLoaded calls fetch /v1/orders/mine exactly once",
+          counts.orders === 1, JSON.stringify(counts));
+    // After the load finished, a later call (language toggle) re-runs.
+    run(ctx, "loadAccount()");
+    await sleep(30);
+    check("a later loadAccount() after completion re-runs (toggle re-render works)",
+          counts.me === 2 && counts.listings === 2 && counts.orders === 2, JSON.stringify(counts));
+  }
+
+  console.log("\n=== source: website chat sends the website session, lot detail escapes (2026-10-28) ===");
+  {
+    const chatJs = fs.readFileSync(path.join(WEBSITE, "chat.js"), "utf8");
+    const lotHtml = fs.readFileSync(path.join(WEBSITE, "lot.html"), "utf8");
+    check("chat.js sends the website token (webToken) with an Authorization header to /v1/assistant/chat",
+          chatJs.includes("webToken()") && chatJs.includes("Authorization") && chatJs.includes("/v1/assistant/chat"));
+    check("chat.js never touches the app's kb: session keys",
+          !/localStorage\.(get|set|remove)Item\(\s*"kb:/.test(chatJs.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")) &&
+          !/"kb:"\s*\+/.test(chatJs));
+    check("lot.html escapes server strings in the detail card",
+          lotHtml.includes("function escHtml") && lotHtml.includes("escHtml(l.coop_name") && lotHtml.includes("escHtml(l.id)"));
+    check("lot.html keeps a failed load failed (no eternal Loading on toggle)",
+          lotHtml.includes("lotFailed") && lotHtml.includes("lotFailed = true"));
+    check("account.html dedupes concurrent loads via a shared promise",
+          accountHtml.includes("_accountLoadPromise") && accountHtml.includes("loadAccountInner"));
+  }
+
   console.log(`\n${passed} passed, ${failed} failed.`);
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

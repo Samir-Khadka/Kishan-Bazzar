@@ -110,7 +110,19 @@ function roleLabel(profile){
   if(profile && profile.role === "buyer") return ne ? "क्रेता" : "Buyer";
   return ne ? "किसान" : "Farmer";
 }
+/* Dedupe guard: account.html calls loadAccount() on script load AND
+   site.js applyLang() calls it again on DOMContentLoaded, so every
+   account visit fired /v1/me + /v1/listings/mine + /v1/orders/mine
+   twice, with two concurrent renders racing. Concurrent calls now
+   share one in-flight load; a later call (e.g. a language toggle
+   after the load finished) still re-runs normally. */
+let _accountLoadPromise = null;
 async function loadAccount(){
+  if(_accountLoadPromise) return _accountLoadPromise;
+  _accountLoadPromise = loadAccountInner();
+  try{ await _accountLoadPromise; } finally { _accountLoadPromise = null; }
+}
+async function loadAccountInner(){
   const token = (typeof webToken === "function") ? webToken() : null;
   if(!token){
     window.location.href = "login.html";
