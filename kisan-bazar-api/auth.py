@@ -199,6 +199,12 @@ def _hash_code(phone: str, code: str) -> str:
 def create_auth_code(conn, phone: str) -> str:
     code = f"{secrets.randbelow(1_000_000):06d}"
     code_hash = _hash_code(phone, code)
+    # Prune dead rows on every mint: without this, expired/consumed
+    # codes accumulate forever in the long-lived SQLite file, and
+    # request-code is unauthenticated — anyone could grow the table
+    # at will. Expired rows are useless (verify only accepts live
+    # ones), so deleting them bounds the table to live codes.
+    conn.execute("DELETE FROM auth_codes WHERE expires_at <= datetime('now')")
     # One live code per phone: minting a new code retires every earlier
     # unconsumed one. Without this, a second request left the first
     # code valid too — two (rate limit: three) simultaneous chances to
@@ -215,6 +221,11 @@ def create_auth_code(conn, phone: str) -> str:
     )
     conn.commit()
     _dev_outbox.append({"phone": phone, "code": code})  # stands in for the SMS send
+    # Cap the outbox: on a long-lived process every request-code
+    # appended forever (an unauthenticated endpoint growing memory
+    # without bound). Codes expire in 5 minutes anyway, so anything
+    # older than the newest 200 is long dead.
+    del _dev_outbox[:-200]
     return code
 
 
@@ -258,6 +269,11 @@ def verify_token(token: str):
     try:
         payload = json.loads(_b64d(payload_b64))
     except Exception:
+        return None
+    # A correctly signed payload is always a dict (issue_token builds
+    # one), but a non-dict payload must not reach .get() below and
+    # 500 — defence in depth if the issuer ever changes shape.
+    if not isinstance(payload, dict):
         return None
     if payload.get("exp", 0) < time.time():
         return None

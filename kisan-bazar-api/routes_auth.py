@@ -26,6 +26,16 @@ def request_code():
     # stops one attacker from SMS-bombing a farmer's phone with codes
     if not auth.check_rate_limit(f"request-code:{phone}", max_attempts=3, window_seconds=600):
         return jsonify({"error": "too many code requests for this number, try again later"}), 429
+    # ... and per IP: the per-phone cap alone does NOT stop an attacker
+    # iterating over phone numbers — minting a code for every number in
+    # a range (SMS-spam once a real gateway is configured, plus
+    # auth_codes/outbox growth even in demo mode). 60 distinct numbers
+    # per 10 minutes is generous for any legitimate use (a household or
+    # co-op office behind one NAT) while making bulk enumeration
+    # impractical. Note this inherits the same per-process, remote_addr
+    # caveat as the other IP limits (see auth.py).
+    if not auth.check_rate_limit(f"request-code-ip:{request.remote_addr}", max_attempts=60, window_seconds=600):
+        return jsonify({"error": "too many code requests, try again later"}), 429
 
     # Codes are issued for unknown numbers too — otherwise no new farmer
     # could ever register (signup requires a verified OTP token). This is

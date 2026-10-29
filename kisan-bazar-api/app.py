@@ -19,6 +19,8 @@ including what this deliberately does NOT cover):
   - Auth endpoints are rate-limited per phone: request-code capped to
     stop SMS-bombing a number, verify capped to make brute-forcing the
     6-digit code impractical within the code's 5-minute validity window.
+    Request-code is additionally capped per IP, since a per-phone cap
+    alone cannot stop an attacker iterating over phone numbers.
   - All SQL is parameterized (no string-built queries carry user values)
     — verified by grep, not just by design intent.
   - Unhandled exceptions return a generic 500 with no stack trace or
