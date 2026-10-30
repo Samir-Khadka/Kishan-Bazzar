@@ -28,6 +28,7 @@ Design notes for future maintainers:
 
 import re
 import sys
+import threading
 import time
 from collections import defaultdict
 
@@ -267,17 +268,26 @@ FOLLOWUP_RES = [
 ]
 
 
-def classify_intent(text, context):
+# Patterns lowercased once at import: classify_intent runs on every chat
+# message, and re-lowering all 120+ patterns per message was pure waste.
+_INTENTS_LOWER = {
+    intent: [(pat.lower(), w) for pat, w in patterns]
+    for intent, patterns in INTENTS.items()
+}
+
+
+def classify_intent(text, context, crops=None):
     """Return (intent, confidence 0..1). Uses context for follow-ups."""
     lower = text.lower()
     scores = defaultdict(float)
-    for intent, patterns in INTENTS.items():
+    for intent, patterns in _INTENTS_LOWER.items():
         for pat, w in patterns:
-            if pat.lower() in lower:
+            if pat in lower:
                 scores[intent] += w
 
     # A bare crop name with no other signal is almost always a price question
-    crops = extract_crops(text)
+    if crops is None:
+        crops = extract_crops(text)
     if crops and not scores:
         return "price", 0.75
 
@@ -305,18 +315,39 @@ def T(ne, ro, en, lang):
 
 
 # ---------------------------------------------------------------------------
-# Session context (in-memory; fine for demo scale)
+# Session context (in-memory; fine for demo scale, but bounded)
 # ---------------------------------------------------------------------------
 
 _sessions = {}
 SESSION_TTL = 1800  # 30 minutes
+_SWEEP_INTERVAL = 60  # the TTL sweep is O(n) in session count — run it at
+                      # most once a minute, not on every chat message
+_MAX_SESSIONS = 2000  # memory bound against unbounded session_id creation
+_last_sweep = 0
+_sessions_lock = threading.Lock()
 
 
 def get_context(session_id):
+    global _last_sweep
     now = time.time()
-    # opportunistic cleanup
-    for sid in [s for s, c in _sessions.items() if now - c["updated"] > SESSION_TTL]:
-        del _sessions[sid]
+    # opportunistic cleanup — but rate-limited: the sweep iterates the
+    # whole session table, so running it on every message made EVERY
+    # chat request pay for all other users' sessions.
+    if now - _last_sweep >= _SWEEP_INTERVAL:
+        with _sessions_lock:
+            _last_sweep = now
+            for sid in [s for s, c in _sessions.items()
+                        if now - c["updated"] > SESSION_TTL]:
+                del _sessions[sid]
+    # memory bound on EVERY call (O(1) FIFO: dicts keep insertion
+    # order, so the head is the stalest-created session): session_ids
+    # are caller-chosen, so a client minting unique ids per message
+    # used to grow this dict without limit — the rate-limited sweep
+    # above was too slow a backstop for a burst.
+    if session_id not in _sessions and len(_sessions) >= _MAX_SESSIONS:
+        with _sessions_lock:
+            if session_id not in _sessions and len(_sessions) >= _MAX_SESSIONS:
+                del _sessions[next(iter(_sessions))]
     ctx = _sessions.get(session_id)
     if not ctx:
         ctx = {"last_intent": None, "last_crops": [], "turns": 0, "updated": now}
@@ -342,8 +373,11 @@ def chat(session_id, message, db_conn=None, farmer=None):
               "I didn't catch that — try typing again.", lang),
             chips=_default_chips(lang), lang=lang, intent="fallback")
 
-    intent, conf = classify_intent(text, ctx)
+    # crop extraction runs once per message: classify_intent needs the
+    # crops for the bare-name rule, so compute them here and pass in
+    # instead of extracting twice.
     crops = extract_crops(text)
+    intent, conf = classify_intent(text, ctx, crops=crops)
 
     # context carryover: "and potato's?" with no new intent
     if not crops and ctx.get("last_crops") and intent in (None, ctx.get("last_intent")):

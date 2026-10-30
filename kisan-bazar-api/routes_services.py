@@ -195,21 +195,21 @@ def assistant_chat():
     if not auth.check_rate_limit(f"assistant:{request.remote_addr}", max_attempts=30, window_seconds=60):
         return jsonify({"error": "too many requests, slow down"}), 429
 
-    # Optional auth: personalize ledger/order answers when a token is given
+    # Optional auth: personalize ledger/order answers when a token is given.
+    # One DB connection serves both the farmer lookup and the chat —
+    # the old code opened a second connection for the chat call even
+    # when a valid token was supplied.
     farmer = None
     authz = request.headers.get("Authorization", "")
-    if authz.startswith("Bearer "):
-        phone = auth.verify_token(authz[7:])
-        if phone:
-            conn = db.get_db()
-            row = repositories.get_farmer(conn, phone)
-            conn.close()
-            if row:
-                farmer = {"phone": row["phone"], "name": row["name"],
-                          "is_staff": row["is_staff"]}
-
     conn = db.get_db()
     try:
+        if authz.startswith("Bearer "):
+            phone = auth.verify_token(authz[7:])
+            if phone:
+                row = repositories.get_farmer(conn, phone)
+                if row:
+                    farmer = {"phone": row["phone"], "name": row["name"],
+                              "is_staff": row["is_staff"]}
         result = assistant.chat(session_id, message, db_conn=conn, farmer=farmer)
     finally:
         conn.close()
