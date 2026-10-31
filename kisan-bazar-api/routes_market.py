@@ -2,8 +2,6 @@
 bid/offer negotiation, price trends and public stats. The stock
 invariant for orders and offer acceptance lives in availability.py;
 row reads for offers/lots go through repositories.py."""
-import re
-
 from flask import Blueprint, g, jsonify, request
 
 import aggregation
@@ -11,7 +9,8 @@ import auth
 import availability
 import db
 import repositories
-from web import (DEFAULT_TARGET_KG, MAX_REASONABLE_KG, idempotent, reject,
+from web import (DEFAULT_TARGET_KG, MAX_REASONABLE_KG, idempotent,
+                 is_valid_nepali_mobile, reject,
                  require_auth, require_self, require_staff,
                  valid_positive_kg)
 
@@ -191,7 +190,7 @@ def place_order():
         return jsonify({"error": f"quantity_kg must be a number between 0 and {MAX_REASONABLE_KG}"}), 400
     phone = str(body["buyer_phone"]).strip()
     # Nepali mobiles: 98XXXXXXXX / 97XXXXXXXX (10 digits, NTC/Ncell)
-    if not re.fullmatch(r"9[678]\d{8}", phone):
+    if not is_valid_nepali_mobile(phone):
         return jsonify({"error": "buyer_phone must be a valid Nepali mobile number"}), 400
     if phone != g.phone:
         return jsonify({"error": "you can only do this for your own phone number"}), 403
@@ -307,7 +306,7 @@ def make_offer():
     if missing:
         return jsonify({"error": f"missing fields: {missing}"}), 400
     phone = str(body["buyer_phone"]).strip()
-    if not re.fullmatch(r"9[678]\d{8}", phone):
+    if not is_valid_nepali_mobile(phone):
         return jsonify({"error": "buyer_phone must be a valid Nepali mobile number"}), 400
     try:
         rate = float(body["bid_rate_per_kg"]); qty = float(body["quantity_kg"])

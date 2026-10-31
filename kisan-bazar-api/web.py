@@ -10,6 +10,7 @@ invariant — the staff check, in particular, previously existed as
 three hand-rolled copies that had already started to drift.
 """
 import os
+import re
 import sqlite3
 import time
 from datetime import datetime
@@ -193,7 +194,6 @@ def _idem_claim(key):
         finally:
             conn.close()
         raise
-    conn.close()
 
 
 def _idem_await_completion(key):
@@ -295,6 +295,16 @@ def idempotent(f):
 
 def valid_positive_kg(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 < value <= MAX_REASONABLE_KG
+
+
+# Nepali mobiles: 10 digits starting 96/97/98 (NTC/Ncell). Validated at
+# two money-path endpoints (orders, offers) — one shared predicate here
+# so the two copies can never drift apart.
+_NEPALI_MOBILE_RE = re.compile(r"9[678]\d{8}")
+
+
+def is_valid_nepali_mobile(phone):
+    return bool(phone) and bool(_NEPALI_MOBILE_RE.fullmatch(str(phone).strip()))
 
 
 def reject(conn, error, status):

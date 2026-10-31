@@ -113,7 +113,13 @@ def _form_lot_locked(conn, coop_id, crop_code, grade, target_kg):
 
     pooled_total = target_kg - remaining_needed
     conn.execute("UPDATE lots SET pooled_kg=? WHERE id=?", (pooled_total, lot_id))
-    conn.commit()
+    # NO commit here: transaction ownership belongs to the caller
+    # (check_and_form_lot commits when it started the transaction, the
+    # caller's own BEGIN IMMEDIATE stays open otherwise). Committing
+    # inside would end a caller-held transaction early and make the
+    # caller's rollback unable to undo their earlier writes — the same
+    # "inner function commits" bug class repositories.py exists to
+    # prevent.
 
     return {
         "lot_id": lot_id,
