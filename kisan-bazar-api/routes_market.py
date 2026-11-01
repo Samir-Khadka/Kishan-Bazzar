@@ -12,7 +12,7 @@ import repositories
 from web import (DEFAULT_TARGET_KG, MAX_REASONABLE_KG, idempotent,
                  is_valid_nepali_mobile, reject,
                  require_auth, require_self, require_staff,
-                 valid_positive_kg)
+                 valid_positive_kg, valid_positive_number)
 
 bp = Blueprint("market", __name__)
 
@@ -131,7 +131,7 @@ def confirm_lot(lot_id):
     if "rate_per_kg" not in body:
         return jsonify({"error": "rate_per_kg required"}), 400
     rate = body["rate_per_kg"]
-    if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
+    if not valid_positive_number(rate):
         return jsonify({"error": "rate_per_kg must be a positive number"}), 400
 
     conn = db.get_db()
@@ -256,7 +256,7 @@ def settle_order(order_id):
         amount = float(body.get("amount"))
     except (TypeError, ValueError):
         return jsonify({"error": "amount must be a number"}), 400
-    if amount <= 0:
+    if not valid_positive_number(amount):
         return jsonify({"error": "amount must be positive"}), 400
     reference = (body.get("reference") or "").strip() or None
 
@@ -312,7 +312,7 @@ def make_offer():
         rate = float(body["bid_rate_per_kg"]); qty = float(body["quantity_kg"])
     except (TypeError, ValueError):
         return jsonify({"error": "bid_rate_per_kg and quantity_kg must be numbers"}), 400
-    if rate <= 0 or qty <= 0 or qty > MAX_REASONABLE_KG:
+    if not valid_positive_number(rate) or not valid_positive_kg(qty):
         return jsonify({"error": "invalid rate or quantity"}), 400
 
     conn = db.get_db()
@@ -372,7 +372,7 @@ def decide_offer(offer_id):
             counter = float(body.get("counter_rate_per_kg"))
         except (TypeError, ValueError):
             return jsonify({"error": "counter_rate_per_kg required for counter"}), 400
-        if counter <= 0:
+        if not valid_positive_number(counter):
             return jsonify({"error": "counter rate must be positive"}), 400
 
     conn = db.get_db()

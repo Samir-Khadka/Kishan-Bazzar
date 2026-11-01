@@ -7,7 +7,7 @@ import assistant
 import auth
 import db
 import repositories
-from web import reject, require_auth
+from web import reject, require_auth, valid_positive_number
 
 bp = Blueprint("services", __name__)
 
@@ -41,7 +41,7 @@ def create_rental():
         return jsonify({"error": "rate_per_day must be a number"}), 400
     if mtype not in RENTAL_TYPES:
         return jsonify({"error": f"machine_type must be one of {list(RENTAL_TYPES)}"}), 400
-    if not name or not location or not contact or rate <= 0:
+    if not name or not location or not contact or not valid_positive_number(rate):
         return jsonify({"error": "machine_name, location, contact_phone and positive rate_per_day required"}), 400
     conn = db.get_db()
     me = repositories.get_farmer(conn, g.phone)

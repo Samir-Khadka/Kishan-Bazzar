@@ -11,6 +11,7 @@ three hand-rolled copies that had already started to drift.
 """
 import os
 import re
+import math
 import sqlite3
 import time
 from datetime import datetime
@@ -295,6 +296,19 @@ def idempotent(f):
 
 def valid_positive_kg(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 < value <= MAX_REASONABLE_KG
+
+
+def valid_positive_number(value):
+    """Any positive, finite number — for money paths (rates, amounts).
+
+    `<= 0`-style checks let NaN and Infinity through: every comparison
+    with NaN is False, so `nan <= 0` is False and the value passes. A NaN
+    then corrupts downstream math (totals become NaN → invalid JSON in
+    responses), and on this Python's SQLite it is converted to NULL on
+    INSERT, violating NOT NULL and surfacing as an unhandled 500.
+    Reject non-finite values up front with an honest 400 instead."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and value > 0)
 
 
 # Nepali mobiles: 10 digits starting 96/97/98 (NTC/Ncell). Validated at
