@@ -402,6 +402,17 @@ def decide_offer(offer_id):
             lot = repositories.get_lot(conn, offer["lot_id"])
             if not lot:
                 return reject(conn, "lot not found", 404)
+            # The lot must be priced and open for sales — the same gate
+            # direct orders go through (availability.place_order_locked).
+            # Accepting on a forming lot used to convert the bid into a
+            # real order on a lot the co-op had never confirmed: the
+            # order then sat outside collection routing (ready lots
+            # only) while still counting in the farmer's dues. Bids may
+            # be placed and countered early; acceptance waits for the
+            # confirmed (ready) lot.
+            if lot["status"] != "ready":
+                return reject(
+                    conn, f"lot is '{lot['status']}', not orderable", 409)
             rate = offer["counter_rate_per_kg"] if offer["status"] == "countered" and offer["counter_rate_per_kg"] else offer["bid_rate_per_kg"]
             try:
                 availability.insert_order(
