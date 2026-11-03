@@ -744,6 +744,15 @@ async function doVerifyCode(code){
         account.busy = false; saveAccount(); render({skipScroll:true});
         return;
       }
+      // Any other /v1/me failure (500, dropped connection): the token IS
+      // valid — verify succeeded — but we have no profile (name/role), so
+      // the role tabs would stay wrong. Claiming "Connected" here used to
+      // lie silently. Surface the failure instead; the session stays alive
+      // and the user can retry by logging out and back in.
+      account.lastError = e.message || T("प्रोफाइल लोड हुन सकेन","Could not load profile");
+      account.busy = false; saveAccount(); render({skipScroll:true});
+      toast("⚠️ " + account.lastError);
+      return;
     }
     toast(T("जोडियो","Connected"));
     // Restore the farmer's last saved land type from the server so the
@@ -2444,8 +2453,12 @@ let _submittingOffer = false;  // guards against double-tap duplicate bids
 async function doSubmitOffer(){
   const d = S.offerDialog;
   if(!d) return;
-  const rate = parseFloat(($("offerRate")||{}).value);
-  const qty = parseFloat(($("offerQty")||{}).value);
+  // Strict Number(): parseFloat("80abc") silently bid 80 — a farmer must
+  // be quoted exactly what they typed (same class as the rental-days fix).
+  const rateRaw = (($("offerRate")||{}).value || "").trim();
+  const qtyRaw = (($("offerQty")||{}).value || "").trim();
+  const rate = Number(rateRaw);
+  const qty = Number(qtyRaw);
   if(!rate || rate <= 0 || !qty || qty <= 0){
     toast(T("भाउ र मात्रा सही लेख्नुहोस्","Enter a valid rate and quantity"));
     return;
@@ -2551,6 +2564,18 @@ async function doPlaceOrder(){
     toast(T("अर्डर हुन सकेन — फेरि प्रयास गर्नुहोस्", "Order failed — try again"));
   }
   render();
+}
+
+// One cart step (+5/-5) from a market button. Returns false when the lot
+// no longer exists in LOTS (a stale button fired after loadLots() swapped
+// the data, or a lot removed server-side) — the caller must NOT render
+// then, since nothing changed. Reading l.kg on a missing lot threw a
+// TypeError that killed the whole click handler mid-tap.
+function cartStep(id, delta){
+  const l = LOTS.find(x=>x.id===id);
+  if(!l || !l.kg) return false;
+  S.cart[id] = Math.max(0, Math.min(l.kg, (S.cart[id]||0) + delta));
+  return true;
 }
 
 function viewCart(){
@@ -3162,7 +3187,11 @@ const _settlingOrders = new Set();  // one in-flight settle per order: a
 // double-tap used to fire two POSTs, the second landing as a
 // confusing error over the "Settled" confirmation.
 async function doSettleOrder(orderId){
-  const amt = parseFloat((document.getElementById("settle-amt-"+orderId)||{}).value);
+  // Strict Number(): parseFloat("10abc") silently settled 10 — a settle
+  // records real money, so quote exactly what was typed (same class as
+  // the rental-days fix).
+  const amtRaw = ((document.getElementById("settle-amt-"+orderId)||{}).value || "").trim();
+  const amt = Number(amtRaw);
   const method = (document.getElementById("settle-method-"+orderId)||{}).value || "cash";
   const reference = ((document.getElementById("settle-ref-"+orderId)||{}).value || "").trim();
   if(!(amt > 0)){ toast(T("सही रकम लेख्नुहोस्","Enter a valid amount")); return; }
@@ -3205,7 +3234,9 @@ const _confirmingLots = new Set();  // one in-flight confirm per lot: a
 // the "Lot confirmed" toast (the backend now rejects re-confirms).
 async function doConfirmLot(lotId){
   const inp = document.getElementById("rate-"+lotId);
-  const rate = parseFloat(inp && inp.value);
+  // Strict Number(): parseFloat("50x") silently confirmed 50 — a lot rate
+  // sets what every farmer gets paid (same class as the rental-days fix).
+  const rate = Number(((inp && inp.value) || "").trim());
   if(!(rate > 0)){ toast(T("सही भाउ लेख्नुहोस्","Enter a valid rate")); return; }
   if(_confirmingLots.has(lotId)) return;
   _confirmingLots.add(lotId);
@@ -3374,9 +3405,10 @@ document.addEventListener("click", e=>{
   }
 
   if(t.dataset.lot){
-    const id=t.dataset.lot, l=LOTS.find(x=>x.id===id);
-    S.cart[id]=Math.max(0, Math.min(l.kg, (S.cart[id]||0) + (+t.dataset.d)));
-    render(); return;
+    // cartStep() guards stale buttons itself; skip the render when
+    // nothing changed.
+    if(cartStep(t.dataset.lot, +t.dataset.d)) render();
+    return;
   }
   if(t.dataset.bookRental){ doBookRental(t.dataset.bookRental); return; }
   if(t.dataset.doctorCrop){ doctor.crop = t.dataset.doctorCrop; doctor.result = null; render({skipScroll:true}); return; }
@@ -3386,7 +3418,9 @@ document.addEventListener("click", e=>{
   if(t.id==="offerCancelBtn"){ S.offerDialog=null; render(); return; }
   if(t.dataset.decideOffer){ decideOffer(t.dataset.decideOffer, t.dataset.decision); return; }
   if(t.dataset.counterOffer){
-    const v = parseFloat(($( "counter-"+t.dataset.counterOffer)||{}).value);
+    // Strict Number(): parseFloat("50x") silently countered 50 (same class
+    // as the rental-days fix).
+    const v = Number((($( "counter-"+t.dataset.counterOffer)||{}).value || "").trim());
     if(!v || v<=0){ toast(T("काउन्टर भाउ लेख्नुहोस्","Enter a counter rate")); return; }
     decideOffer(t.dataset.counterOffer, "countered", v); return;
   }
