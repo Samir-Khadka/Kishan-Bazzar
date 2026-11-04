@@ -68,6 +68,11 @@
   const input = panel.querySelector("#kb-chat-text");
   let sessionId = "web-" + Math.random().toString(36).slice(2, 10);
   let greeted = false;
+  // No parallel chats: a rapid Enter/double-tap on the send button
+  // used to fire duplicate /v1/assistant/chat requests whose typing
+  // bubbles and replies interleaved (and burned the endpoint's per-IP
+  // rate limit). Extra taps while one is in flight are now dropped.
+  let sending = false;
 
   function addMsg(text, who){
     const d = document.createElement("div");
@@ -115,7 +120,8 @@
   }
   async function send(){
     const text = input.value.trim();
-    if(!text) return;
+    if(!text || sending) return;
+    sending = true;
     input.value = "";
     addMsg(text, "user");
     const typing = addMsg("…", "bot typing");
@@ -145,6 +151,8 @@
       typing.remove();
       const ne = (typeof LANG !== "undefined" ? LANG : "ne") === "ne";
       addMsg(ne ? "माफ गर्नुहोस्, जडान हुन सकेन।" : "Sorry, could not connect.", "bot");
+    }finally{
+      sending = false;
     }
   }
 

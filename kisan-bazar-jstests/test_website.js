@@ -360,6 +360,85 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
           accountHtml.includes("_accountLoadPromise") && accountHtml.includes("loadAccountInner"));
   }
 
+  console.log("\n=== account page: mid-page 401 aborts the rest of the load (2026-11-04) ===");
+  {
+    // The token dies AFTER /v1/me succeeded (mid-page expiry): before
+    // the fix, apiAuthed's bounce on /v1/listings/mine was swallowed
+    // and the orders section fired one more authenticated request with
+    // the dead token ("Bearer null") — a wasted fetch and a second
+    // navigation to the same login page.
+    const counts = { me: 0, listings: 0, orders: 0 };
+    const fetchImpl = async (url, opts = {}) => {
+      const u = String(url);
+      if (u.includes("/v1/me")) { counts.me++; return { ok: true, status: 200, json: async () => ({ phone: "9841000001", name: "Sarita Tamang", role: "farmer", coop_id: "kavre-veg", isStaff: false }) }; }
+      if (u.includes("/v1/listings/mine")) { counts.listings++; return { ok: false, status: 401, json: async () => ({ error: "unauthorized" }) }; }
+      if (u.includes("/v1/orders/mine")) { counts.orders++; return { ok: false, status: 401, json: async () => ({ error: "unauthorized" }) }; }
+      throw new Error("unexpected fetch " + u);
+    };
+    const ctx = makeContext({
+      fetchImpl,
+      storage: { "kbw:accountToken": JSON.stringify("tok-expired"), "kbw:accountPhone": JSON.stringify("9841000001") }
+    });
+    let bounceTo = null, bounceCount = 0;
+    Object.defineProperty(ctx.sandbox.window.location, "href", {
+      get() { return bounceTo; }, set(v) { bounceCount++; bounceTo = v; }, configurable: true
+    });
+    for (const s of inlineScripts(accountHtml)) vm.runInContext(s, ctx.sandbox, { filename: "account-inline.js" });
+    await sleep(30);
+    check("dead token mid-page: listings fetched once, orders never fetched",
+          counts.listings === 1 && counts.orders === 0, JSON.stringify(counts));
+    check("dead token mid-page: single bounce to login.html (no double navigation)",
+          bounceCount === 1 && bounceTo === "login.html", `${bounceCount} -> ${bounceTo}`);
+    check("dead token mid-page: the dead website session is cleared",
+          !("kbw:accountToken" in ctx.storageData), JSON.stringify(Object.keys(ctx.storageData)));
+    check("account.html source aborts the load after a mid-page 401 bounce",
+          /String\(e\.message\) === "401"\) return;/.test(accountHtml));
+  }
+
+  console.log("\n=== account page: language toggle mid-load re-renders in the new language (2026-11-04) ===");
+  {
+    // The 2026-10-28 dedupe guard made a language toggle DURING the
+    // load a no-op: the dynamic cards rendered in the pre-toggle
+    // language while all static text followed the toggle.
+    const counts = { me: 0, listings: 0, orders: 0 };
+    let releaseMe, firstMe = true;
+    const fetchImpl = async (url) => {
+      const u = String(url);
+      if (u.includes("/v1/me")) {
+        counts.me++;
+        if (firstMe) { firstMe = false; await new Promise(res => { releaseMe = res; }); }
+        return { ok: true, status: 200, json: async () => ({ phone: "9841000001", name: "Sarita Tamang", role: "farmer", coop_id: "kavre-veg", isStaff: false }) };
+      }
+      if (u.includes("/v1/listings/mine")) { counts.listings++; return { ok: true, status: 200, json: async () => ([]) }; }
+      if (u.includes("/v1/orders/mine")) { counts.orders++; return { ok: true, status: 200, json: async () => ([]) }; }
+      throw new Error("unexpected fetch " + u);
+    };
+    const ctx = makeContext({
+      fetchImpl,
+      storage: { "kbw:accountToken": JSON.stringify("tok-website"), "kbw:accountPhone": JSON.stringify("9841000001") }
+    });
+    for (const s of inlineScripts(accountHtml)) vm.runInContext(s, ctx.sandbox, { filename: "account-inline.js" });
+    await sleep(10); // script-load call is now held inside /v1/me
+    run(ctx, "LANG = 'en'");  // user toggles NE -> EN mid-load ...
+    run(ctx, "loadAccount()"); // ... and applyLang() re-renders while in flight
+    releaseMe();               // the first load's /v1/me resolves
+    await sleep(60);
+    const listings = String(ctx.els["my-listings"].innerHTML || "");
+    check("toggle mid-load re-runs the load in the new language",
+          counts.me === 2 && counts.listings === 2 && counts.orders === 2, JSON.stringify(counts));
+    check("dynamic cards render in the toggled language (EN, not NE)",
+          listings.includes("No listings yet.") && !listings.includes("कुनै लिस्टिङ छैन"), listings);
+  }
+
+  console.log("\n=== source: chat.js drops duplicate sends while one is in flight (2026-11-04) ===");
+  {
+    const chatJs = fs.readFileSync(path.join(WEBSITE, "chat.js"), "utf8");
+    check("chat.js guards send() with an in-flight flag",
+          chatJs.includes("let sending = false;") &&
+          /if\s*\(!text\s*\|\|\s*sending\)\s*return;/.test(chatJs) &&
+          /finally\s*\{\s*sending = false;/.test(chatJs));
+  }
+
   console.log(`\n${passed} passed, ${failed} failed.`);
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

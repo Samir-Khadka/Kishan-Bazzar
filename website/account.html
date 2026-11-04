@@ -115,10 +115,26 @@ function roleLabel(profile){
    account visit fired /v1/me + /v1/listings/mine + /v1/orders/mine
    twice, with two concurrent renders racing. Concurrent calls now
    share one in-flight load; a later call (e.g. a language toggle
-   after the load finished) still re-runs normally. */
+   after the load finished) still re-runs normally. If the language
+   toggled WHILE a load was in flight, the shared promise resolves
+   but nothing re-renders — leaving the dynamic cards in the
+   pre-toggle language — so we re-run once in that case instead. */
 let _accountLoadPromise = null;
+let _accountLoadLang = null;
 async function loadAccount(){
-  if(_accountLoadPromise) return _accountLoadPromise;
+  if(_accountLoadPromise){
+    let err = null;
+    try{ await _accountLoadPromise; }catch(e){ err = e; }
+    // A language toggle mid-load would otherwise leave the dynamic cards
+    // in the language the load STARTED with, while all static text
+    // follows the toggle. _accountLoadLang is captured at load start;
+    // if it no longer matches, re-run once so the cards follow the
+    // toggle like the rest of the page.
+    if(_accountLoadLang !== LANG){ if(err) throw err; return loadAccount(); }
+    if(err) throw err;
+    return;
+  }
+  _accountLoadLang = LANG;
   _accountLoadPromise = loadAccountInner();
   try{ await _accountLoadPromise; } finally { _accountLoadPromise = null; }
 }
@@ -175,7 +191,12 @@ async function loadAccountInner(){
       }
     }
   }catch(e){
-    if(String(e.message) !== "401" && listingsEl)
+    // A 401 means the session died mid-page: apiAuthed already cleared
+    // it and bounced to login.html, so abort the rest of this load —
+    // otherwise the orders section fires one more authenticated request
+    // with the dead token ("Bearer null"), which 401s and bounces again.
+    if(String(e.message) === "401") return;
+    if(listingsEl)
       listingsEl.innerHTML = `<p class="muted">${ne ? "लिस्टिङ लोड हुन सकेन।" : "Could not load listings."}</p>`;
   }
 
@@ -196,7 +217,10 @@ async function loadAccountInner(){
       }
     }
   }catch(e){
-    if(String(e.message) !== "401" && ordersEl)
+    // Same mid-page 401 abort as above: don't fire a request the
+    // session can't satisfy once the bounce already started.
+    if(String(e.message) === "401") return;
+    if(ordersEl)
       ordersEl.innerHTML = `<p class="muted">${ne ? "अर्डर लोड हुन सकेन।" : "Could not load orders."}</p>`;
   }
 }
