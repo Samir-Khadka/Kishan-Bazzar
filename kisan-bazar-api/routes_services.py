@@ -7,7 +7,7 @@ import assistant
 import auth
 import db
 import repositories
-from web import reject, require_auth, valid_positive_number
+from web import parse_number, reject, require_auth, valid_positive_number
 
 bp = Blueprint("services", __name__)
 
@@ -36,13 +36,20 @@ def create_rental():
     location = (body.get("location") or "").strip()
     contact = (body.get("contact_phone") or "").strip()
     try:
-        rate = float(body.get("rate_per_day"))
+        # parse_number, not float(): JSON true would otherwise cast
+        # to 1.0 and slip past the bool rejection in
+        # valid_positive_number.
+        rate = parse_number(body.get("rate_per_day"))
     except (TypeError, ValueError):
         return jsonify({"error": "rate_per_day must be a number"}), 400
     if mtype not in RENTAL_TYPES:
         return jsonify({"error": f"machine_type must be one of {list(RENTAL_TYPES)}"}), 400
     if not name or not location or not contact or not valid_positive_number(rate):
         return jsonify({"error": "machine_name, location, contact_phone and positive rate_per_day required"}), 400
+    # Free-text fields: bound them — an authenticated caller could
+    # otherwise bloat the rentals table with unbounded strings.
+    if len(name) > 120 or len(location) > 200 or len(contact) > 32:
+        return jsonify({"error": "machine_name/location/contact_phone too long"}), 400
     conn = db.get_db()
     me = repositories.get_farmer(conn, g.phone)
     cur = conn.execute(

@@ -4,6 +4,7 @@ phone-match), so one farmer can never read or write another's
 records."""
 from flask import Blueprint, g, jsonify, request
 
+import auth
 import db
 import repositories
 from web import require_auth, require_self
@@ -30,6 +31,12 @@ def save_land_scan(phone):
         return jsonify({"error": f"land_type must be one of {sorted(VALID_LAND_TYPES)}"}), 400
     if body["confidence"] not in VALID_CONFIDENCE:
         return jsonify({"error": f"confidence must be one of {sorted(VALID_CONFIDENCE)}"}), 400
+    # The derived signals are free-form client strings — bound them so
+    # an authenticated caller can't bloat the table with unbounded text.
+    for field in ("color_key", "texture", "drainage"):
+        val = body.get(field)
+        if val is not None and len(str(val)) > 64:
+            return jsonify({"error": f"{field} too long"}), 400
 
     conn = db.get_db()
     farmer = repositories.get_farmer(conn, phone)
@@ -107,9 +114,20 @@ def crop_doctor_diagnose():
     Returns ranked diagnoses with remedies from the agronomy KB.
     Photo bytes are NOT sent here — upload separately; photo_ref links them.
     """
+    # Rate-limited per IP: every call writes a diagnoses row, so an
+    # uncapped caller (one account is trivially obtainable) could bloat
+    # the table. 20 per 10 minutes is plenty for interactive use.
+    if not auth.check_rate_limit(f"diagnose:{request.remote_addr}", max_attempts=20, window_seconds=600):
+        return jsonify({"error": "too many requests, slow down"}), 429
     body = request.get_json(force=True, silent=True) or {}
     crop_code = (body.get("crop_code") or "").strip().upper()
     symptoms = (body.get("symptoms") or "").strip()
+    # Free-text fields are stored verbatim — bound them against DB bloat.
+    if len(symptoms) > 2000:
+        return jsonify({"error": "symptoms too long"}), 400
+    photo_ref_in = (body.get("photo_ref") or "").strip()
+    if len(photo_ref_in) > 256:
+        return jsonify({"error": "photo_ref too long"}), 400
     # The diagnosis is written to the AUTHENTICATED farmer's history.
     # This endpoint used to accept any farmer_phone in the body with
     # no login at all — anyone could poison anyone else's history.
@@ -117,7 +135,7 @@ def crop_doctor_diagnose():
     if claimed and claimed != g.phone:
         return jsonify({"error": "you can only do this for your own phone number"}), 403
     farmer_phone = g.phone
-    photo_ref = (body.get("photo_ref") or "").strip() or None
+    photo_ref = photo_ref_in or None
     if not crop_code or not symptoms:
         return jsonify({"error": "crop_code and symptoms are required"}), 400
 

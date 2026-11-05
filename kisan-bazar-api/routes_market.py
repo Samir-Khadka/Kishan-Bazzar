@@ -10,7 +10,7 @@ import availability
 import db
 import repositories
 from web import (DEFAULT_TARGET_KG, MAX_REASONABLE_KG, idempotent,
-                 is_valid_nepali_mobile, reject,
+                 is_valid_nepali_mobile, parse_number, reject,
                  require_auth, require_self, require_staff,
                  valid_positive_kg, valid_positive_number)
 
@@ -194,6 +194,11 @@ def place_order():
         return jsonify({"error": "buyer_phone must be a valid Nepali mobile number"}), 400
     if phone != g.phone:
         return jsonify({"error": "you can only do this for your own phone number"}), 403
+    # Free-text display name: bound it — an authenticated caller could
+    # otherwise bloat the orders table with unbounded strings.
+    buyer_name = str(body["buyer_name"]).strip()
+    if len(buyer_name) > 120:
+        return jsonify({"error": "buyer_name too long"}), 400
 
     # The stock invariant lives in availability.py — one locked
     # implementation shared with offer acceptance.
@@ -203,7 +208,7 @@ def place_order():
             conn,
             lot_id=body["lot_id"],
             quantity_kg=body["quantity_kg"],
-            buyer_name=body["buyer_name"],
+            buyer_name=buyer_name,
             buyer_phone=phone,
         )
     except availability.StockError as e:
@@ -253,12 +258,16 @@ def settle_order(order_id):
             "error": f"method must be one of {list(repositories.SETTLEMENT_METHODS)}"
         }), 400
     try:
-        amount = float(body.get("amount"))
+        amount = parse_number(body.get("amount"))
     except (TypeError, ValueError):
         return jsonify({"error": "amount must be a number"}), 400
     if not valid_positive_number(amount):
         return jsonify({"error": "amount must be positive"}), 400
     reference = (body.get("reference") or "").strip() or None
+    # Staff note: bound it — this is free text on an authenticated
+    # write path.
+    if reference and len(reference) > 500:
+        return jsonify({"error": "reference too long"}), 400
 
     conn = db.get_db()
     try:
@@ -308,12 +317,18 @@ def make_offer():
     phone = str(body["buyer_phone"]).strip()
     if not is_valid_nepali_mobile(phone):
         return jsonify({"error": "buyer_phone must be a valid Nepali mobile number"}), 400
+    # float() alone would accept JSON true as 1.0 — parse_number
+    # rejects booleans before the cast (see web.py).
     try:
-        rate = float(body["bid_rate_per_kg"]); qty = float(body["quantity_kg"])
+        rate = parse_number(body["bid_rate_per_kg"]); qty = parse_number(body["quantity_kg"])
     except (TypeError, ValueError):
         return jsonify({"error": "bid_rate_per_kg and quantity_kg must be numbers"}), 400
     if not valid_positive_number(rate) or not valid_positive_kg(qty):
         return jsonify({"error": "invalid rate or quantity"}), 400
+    # Free-text display name: bound it.
+    buyer_name = str(body["buyer_name"]).strip()
+    if len(buyer_name) > 120:
+        return jsonify({"error": "buyer_name too long"}), 400
 
     conn = db.get_db()
     lot = repositories.get_lot(conn, body["lot_id"])
@@ -327,7 +342,7 @@ def make_offer():
     cur = conn.execute(
         "INSERT INTO offers (lot_id, buyer_phone, buyer_name, bid_rate_per_kg, quantity_kg) "
         "VALUES (?,?,?,?,?)",
-        (body["lot_id"], phone, str(body["buyer_name"]).strip(), rate, qty))
+        (body["lot_id"], phone, buyer_name, rate, qty))
     conn.commit()
     offer_id = cur.lastrowid
     conn.close()
@@ -368,8 +383,11 @@ def decide_offer(offer_id):
         return jsonify({"error": "decision must be accepted, rejected, or countered"}), 400
     counter = None
     if decision == "countered":
+        # parse_number, not float(): JSON true would otherwise cast
+        # to 1.0 and slip past the bool rejection in
+        # valid_positive_number.
         try:
-            counter = float(body.get("counter_rate_per_kg"))
+            counter = parse_number(body.get("counter_rate_per_kg"))
         except (TypeError, ValueError):
             return jsonify({"error": "counter_rate_per_kg required for counter"}), 400
         if not valid_positive_number(counter):

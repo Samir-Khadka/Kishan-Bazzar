@@ -10,7 +10,7 @@ import auth
 import db
 import messaging
 import repositories
-from web import DEMO_MODE, require_auth, require_self
+from web import DEMO_MODE, parse_number, require_auth, require_self
 
 bp = Blueprint("auth", __name__)
 
@@ -186,9 +186,16 @@ def signup():
         return jsonify({"error": "valid phone number is required"}), 400
     if not name:
         return jsonify({"error": "name is required"}), 400
+    # Free-text display fields: bound them.
+    if len(name) > 120:
+        return jsonify({"error": "name too long"}), 400
+    if len(payout_method) > 64:
+        return jsonify({"error": "payout_method too long"}), 400
     try:
-        lat = float(body.get("lat") if body.get("lat") is not None else 27.62)
-        lon = float(body.get("lon") if body.get("lon") is not None else 85.55)
+        # parse_number, not float(): JSON true would otherwise cast
+        # to 1.0 and silently move the farmer's pin on the map.
+        lat = parse_number(body.get("lat") if body.get("lat") is not None else 27.62)
+        lon = parse_number(body.get("lon") if body.get("lon") is not None else 85.55)
     except (TypeError, ValueError):
         return jsonify({"error": "lat/lon must be numbers"}), 400
     if land_type not in ("khet", "bari", "pakho", "balaute"):

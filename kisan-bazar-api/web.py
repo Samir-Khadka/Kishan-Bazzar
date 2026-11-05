@@ -311,6 +311,20 @@ def valid_positive_number(value):
             and math.isfinite(value) and value > 0)
 
 
+def parse_number(value):
+    """Coerce a JSON number-ish value to float, rejecting booleans.
+
+    Money-path endpoints reach for float() to accept numeric strings
+    ("80" → 80.0), but float(True) is 1.0 — so a plain float() cast
+    re-admits booleans that valid_positive_number deliberately
+    rejects (bid_rate_per_kg: true would place a bid at Rs 1/kg).
+    Raises ValueError so the callers' existing 400 handling catches it.
+    """
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a number")
+    return float(value)
+
+
 # Nepali mobiles: 10 digits starting 96/97/98 (NTC/Ncell). Validated at
 # two money-path endpoints (orders, offers) — one shared predicate here
 # so the two copies can never drift apart.
