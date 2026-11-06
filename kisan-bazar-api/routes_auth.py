@@ -198,6 +198,14 @@ def signup():
         lon = parse_number(body.get("lon") if body.get("lon") is not None else 85.55)
     except (TypeError, ValueError):
         return jsonify({"error": "lat/lon must be numbers"}), 400
+    # Coordinates are map pins and aggregation inputs (haversine
+    # radius): out-of-range values used to be stored verbatim — a
+    # lat of 9999 silently dropped the farmer out of every co-op's
+    # collection radius, and NaN ("nan" parses as a float) became
+    # NULL on INSERT and 500'd on the NOT NULL column. Reject both
+    # with an honest 400.
+    if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+        return jsonify({"error": "lat must be between -90 and 90, lon between -180 and 180"}), 400
     if land_type not in ("khet", "bari", "pakho", "balaute"):
         return jsonify({"error": "unknown land_type"}), 400
 

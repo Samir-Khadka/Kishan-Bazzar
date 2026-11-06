@@ -248,6 +248,14 @@ def _idem_store(key, resp):
         conn.close()
 
 
+def _resp_status(resp):
+    """HTTP status of a view return value: (body, status) tuple or a
+    Response object (defaults to 200)."""
+    if isinstance(resp, tuple):
+        return resp[1] if len(resp) > 1 else 200
+    return getattr(resp, "status_code", 200)
+
+
 def idempotent(f):
     """Idempotency for POST endpoints. The client sends a unique
     `Idempotency-Key` header per logical operation (e.g. a UUID
@@ -289,7 +297,19 @@ def idempotent(f):
             _idem_release_claim(key)
             raise
         if store:
-            _idem_store(key, resp)
+            # Transient responses are NEVER stored: a 429 (rate limit)
+            # or 5xx is a function of WHEN the request ran, not of the
+            # request itself — caching one replayed a stale failure for
+            # 24h while a fresh retry would have succeeded (a client
+            # retrying a rate-limited order with the same key stayed
+            # 429'd long after the window cleared). Release the claim
+            # instead, so the retry runs the handler again. Deterministic
+            # responses (2xx and other 4xx) are stored as before.
+            status = _resp_status(resp)
+            if status == 429 or status >= 500:
+                _idem_release_claim(key)
+            else:
+                _idem_store(key, resp)
         return resp
     return wrapper
 

@@ -218,7 +218,8 @@ def admin_overview(conn):
     past the caps."""
     farmers = conn.execute(
         "SELECT phone, name, coop_id, lat, lon, payout_method, "
-        "land_type, is_staff FROM farmers").fetchall()
+        "land_type, is_staff FROM farmers ORDER BY phone LIMIT 500"
+    ).fetchall()
     listings = conn.execute(
         "SELECT id, farmer_phone, coop_id, crop_code, grade, "
         "quantity_kg, quantity_committed_kg, status, created_at "
@@ -239,6 +240,11 @@ def admin_overview(conn):
         "SELECT COUNT(*) AS c FROM orders").fetchone()["c"]
     total_listings = conn.execute(
         "SELECT COUNT(*) AS c FROM listings").fetchone()["c"]
+    # Farmers are capped at 500 rows above, so the KPI count comes
+    # from COUNT(*) — len(farmers) would silently undercount past
+    # the cap, the same bug the total_kg aggregation fixed below.
+    total_farmers = conn.execute(
+        "SELECT COUNT(*) AS c FROM farmers").fetchone()["c"]
     # total_kg aggregates the whole table: summing only the fetched
     # (capped) listings silently undercounted past 50 listings.
     total_kg = conn.execute(
@@ -254,7 +260,7 @@ def admin_overview(conn):
         "crops": [dict(r) for r in crops],
         "orders": [dict(r) for r in orders],
         "counts": {
-            "farmers": len(farmers),
+            "farmers": total_farmers,
             "listings": total_listings,
             "lots": total_lots,
             "orders": total_orders,
