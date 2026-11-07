@@ -94,7 +94,8 @@ const EXPORT_LIST = [
   "viewAdminOverview","viewAdminFarmers","viewAdminLots","viewAdminRates",
   "doPlaceOrder","doSubmitOffer","trendsCache","rentalsCache","myOffersCache","adminOffersCache",
   "loadLots","doBookRental","nepalDateString","decideOffer","doConfirmLot","doSettleOrder",
-  "cartStep"
+  "cartStep","syncDraftInput","renderAuthModal","renderOfferDialog","adminCache","doctor",
+  "doAuthVerifyCode","doAuthRegister"
 ];
 const combined = appJs + `\n;globalThis.__test = {${EXPORT_LIST.join(",")}};`;
 

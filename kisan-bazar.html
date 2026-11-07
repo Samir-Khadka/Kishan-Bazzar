@@ -420,7 +420,11 @@ const S = {
     {id:1, crop:"cauliflower", kg:40, grade:"A", status:"lot", lot:"KVR-118", rate:52, day:"today"},
     {id:2, crop:"tomato",      kg:25, grade:"B", status:"paid", lot:"KVR-114", rate:41, day:"last_week"}
   ]),
-  cart: store.get("cart", {})
+  cart: store.get("cart", {}),
+  // Draft values for admin inputs (counter rate, settle amount/reference,
+  // lot confirm rate) — kept out of localStorage: they only keep a typed
+  // value alive across re-renders within the session. See syncDraftInput.
+  adminDrafts: {}
 };
 const save = ()=>{ store.set("role",S.role); store.set("tab",S.tab); store.set("zone",S.zone);
                    store.set("land",S.land); store.set("offers",S.offers); store.set("cart",S.cart); };
@@ -518,6 +522,9 @@ let account = {
   token: store.get("accountToken", null),
   loginStep: "idle",     // idle -> code_sent -> register
   regRole: "farmer",
+  regName: "",          // Mine-tab register form draft (see syncDraftInput)
+  adminUser: "",        // admin-login form draft — never persisted
+  adminPass: "",        // admin-login form draft — never persisted
   codeDraft: "",
   busy: false,
   lastError: null
@@ -654,13 +661,15 @@ function clearSessionState(){
   // single session object and everything (including the test harness)
   // holds it by reference.
   Object.assign(account, {phone:"", name:"", role:"farmer", isStaff:false, token:null,
-             loginStep:"idle", regRole:"farmer", codeDraft:"", busy:false, lastError:null,
+             loginStep:"idle", regRole:"farmer", regName:"", adminUser:"", adminPass:"",
+             codeDraft:"", busy:false, lastError:null,
              showAuth:false});
   saveAccount();
   adminCache = {data:null, at:0, err:null};
   adminOffersCache = {data:null, at:0};
   myOffersCache = {data:null, at:0};
   routeCache = {data:null, at:0, err:null};
+  S.adminDrafts = {};
 }
 
 function doLogout(){
@@ -804,6 +813,7 @@ async function doRegister(){
     const data = await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.error || `server ${res.status}`);
     account.name = name.trim(); account.role = role; account.loginStep = "idle";
+    account.regName = "";
     saveAccount();
     // Jump to the role's home panel
     S.role = role === "buyer" ? "buyer" : role === "staff" ? "admin" : "farmer";
@@ -1668,10 +1678,10 @@ function renderAuthModal(){
     body = `
       <p class="muted" style="margin-bottom:14px">${esc(T("साइट प्रशासकका लागि — प्रयोगकर्ता, लट र भाउ व्यवस्थापन।","For the site administrator — manage users, lots, and prices."))}</p>
       <label for="admin-user" style="font-weight:600;font-size:14px">${esc(T("प्रयोगकर्ता नाम","Username"))}</label>
-      <input id="admin-user" type="text" autocomplete="username" placeholder="admin"
+      <input id="admin-user" type="text" autocomplete="username" placeholder="admin" value="${esc(account.adminUser||"")}"
         style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin:6px 0 12px">
       <label for="admin-pass" style="font-weight:600;font-size:14px">${esc(T("पासवर्ड","Password"))}</label>
-      <input id="admin-pass" type="password" autocomplete="current-password" placeholder="••••••••"
+      <input id="admin-pass" type="password" autocomplete="current-password" placeholder="••••••••" value="${esc(account.adminPass||"")}"
         style="width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin:6px 0 12px">
       ${account.lastError?`<p style="color:var(--alert);font-size:14px;margin-bottom:10px">${esc(account.lastError)}</p>`:""}
       <button class="btn primary" style="width:100%;padding:13px" onclick="doAdminLogin()" ${account.busy?"disabled":""}>
@@ -1753,6 +1763,7 @@ async function doAuthVerifyCode(){
     account.token = data.token; account.loginStep = "idle"; account.codeDraft = "";
     account.showAuth = false; account.busy = false;
     // Fetch profile to get role (staff auto-unlocks admin)
+    let needsRegister = false;
     try{
       const me = await apiGetMe(account.token);
       account.name = me.name || ""; account.isStaff = !!me.isStaff;
@@ -1760,8 +1771,20 @@ async function doAuthVerifyCode(){
       saveAccount();
       S.role = account.role === "buyer" ? "buyer" : account.role === "staff" ? "admin" : "farmer";
       S.tab = TABS[S.role][0][0];
-    }catch(e){}
+    }catch(e){
+      if(e.sessionExpired){ account.busy = false; return; }  // expiry flow routed to login
+      // 404 = verified phone with no profile yet: route to the register
+      // step instead of swallowing it. The old empty catch left a new
+      // user "logged in" with no server profile and no way to register —
+      // the modal's register form was unreachable.
+      if(e.message && e.message.includes("404")) needsRegister = true;
+    }
     if(!account.token){ account.busy = false; render({skipScroll:true}); return; }  // session died mid-login (401 on /v1/me) — expiry flow already routed to login
+    if(needsRegister){
+      account.loginStep = "register"; account.showAuth = true; account.busy = false;
+      saveAccount(); render();
+      return;
+    }
     saveAccount(); render();
     toast(T("स्वागत छ!","Welcome!"));
   }catch(e){
@@ -2309,14 +2332,12 @@ function renderAccountPanel(){
   if(!BACKEND.enabled) return "";
 
   let body;
-  if(account.token){
-    body = `<div class="item" style="border:0;padding:0">
-        <div class="em">✅</div>
-        <div class="bd"><b>${esc(T("जोडिएको","Connected"))} · ${esc(account.phone)}</b>
-          <p>${esc(T("तपाईंको लिस्टिङ सिधै वास्तविक सर्भरमा जान्छ।","Your listings go straight to the real server."))}</p></div>
-      </div>
-      <button class="btn ghost" id="logoutBtn" style="margin-top:10px">${esc(T("लगआउट","Log out"))}</button>`;
-  } else if(account.loginStep === "register"){
+  // The register branch MUST come first: doVerifyCode sets loginStep to
+  // "register" only after a token already exists (verified phone, no
+  // profile yet), so checking the token first shadowed this form
+  // entirely — a new user was shown "Connected" with no way to finish
+  // registering, and the auth button just bounced them back to Mine.
+  if(account.loginStep === "register"){
     // New phone number verified via OTP but no profile yet —
     // collect the basics to complete registration.
     const lands = [["khet","खेत","Khet"],["bari","बारी","Bari"],["pakho","पाखो","Pakho"],["balaute","बलौटे","Balaute"]];
@@ -2328,7 +2349,7 @@ function renderAccountPanel(){
       </div>
       <div class="lbl">${esc(T("तपाईंको नाम","Your name"))}</div>
       <div class="num" style="margin-bottom:10px">
-        <input id="regName" maxlength="60" placeholder="${esc(T("जस्तै: राम बहादुर","e.g. Ram Bahadur"))}">
+        <input id="regName" maxlength="60" placeholder="${esc(T("जस्तै: राम बहादुर","e.g. Ram Bahadur"))}" value="${esc(account.regName||"")}">
       </div>
       ${!isBuyer ? `<div class="lbl">${esc(T("जग्गाको किसिम","Land type"))}</div>
       <div class="num" style="margin-bottom:10px">
@@ -2345,6 +2366,13 @@ function renderAccountPanel(){
         </select>
       </div>
       <button class="btn" id="registerBtn" ${account.busy?"disabled":""}>${account.busy?esc(T("दर्ता हुँदैछ...","Registering...")):esc(T("दर्ता गर्नुहोस्","Register"))}</button>`;
+  } else if(account.token){
+    body = `<div class="item" style="border:0;padding:0">
+        <div class="em">✅</div>
+        <div class="bd"><b>${esc(T("जोडिएको","Connected"))} · ${esc(account.phone)}</b>
+          <p>${esc(T("तपाईंको लिस्टिङ सिधै वास्तविक सर्भरमा जान्छ।","Your listings go straight to the real server."))}</p></div>
+      </div>
+      <button class="btn ghost" id="logoutBtn" style="margin-top:10px">${esc(T("लगआउट","Log out"))}</button>`;
   } else if(account.loginStep === "code_sent"){
     body = `<div class="lbl">${esc(T("कोड पठाइयो — यहाँ लेख्नुहोस्","Code sent — enter it here"))}</div>
       <div class="num" style="margin-bottom:10px">
@@ -2948,18 +2976,32 @@ function adminPanelBar(){
   </div>`;
 }
 
-let adminCache = {data:null, at:0};
+let adminCache = {data:null, at:0, err:null};
+
+// One in-flight /v1/admin/overview at a time: adminLoadState() fires on
+// EVERY render while the overview is loading (language toggle, tab
+// switch, any state change), and without this guard each of those
+// renders issued its own parallel fetch — the same duplicate-fetch
+// class as the account-page fix in 2026-10-28. Concurrent callers
+// share the one promise; it is cleared on settle so a later call can
+// retry after an error.
+let _adminOverviewPromise = null;
 
 async function fetchAdminOverview(){
   // 60s cache so tab switches don't hammer the endpoint
   if(adminCache.data && Date.now() - adminCache.at < 60000) return adminCache.data;
-  const res = await fetch(`${BACKEND.baseUrl}/v1/admin/overview`, {
-    headers: {"Authorization": `Bearer ${account.token}`}
-  });
-  if(checkSession(res)) throw new SessionExpiredError();
-  if(!res.ok) throw new Error(res.status === 403 ? T("स्टाफ पहुँच आवश्यक छ","Staff access required") : `server ${res.status}`);
-  adminCache = {data: await res.json(), at: Date.now()};
-  return adminCache.data;
+  if(_adminOverviewPromise) return _adminOverviewPromise;
+  _adminOverviewPromise = (async()=>{
+    const res = await fetch(`${BACKEND.baseUrl}/v1/admin/overview`, {
+      headers: {"Authorization": `Bearer ${account.token}`}
+    });
+    if(checkSession(res)) throw new SessionExpiredError();
+    if(!res.ok) throw new Error(res.status === 403 ? T("स्टाफ पहुँच आवश्यक छ","Staff access required") : `server ${res.status}`);
+    adminCache = {data: await res.json(), at: Date.now(), err: null};
+    return adminCache.data;
+  })();
+  try{ return await _adminOverviewPromise; }
+  finally{ _adminOverviewPromise = null; }
 }
 
 function viewAdminGuard(){
@@ -3041,7 +3083,7 @@ function viewAdminLots(){
         <span style="font-size:12px;color:var(--ink-3)">${esc(l.id)}</span>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        <input id="rate-${esc(l.id)}" inputmode="decimal" placeholder="${esc(T("रू/के.जी.","Rs/kg"))}" style="flex:1;padding:10px;border:1px solid var(--line);border-radius:9px;font-size:15px">
+        <input id="rate-${esc(l.id)}" inputmode="decimal" placeholder="${esc(T("रू/के.जी.","Rs/kg"))}" value="${esc(S.adminDrafts["rate-"+l.id]||"")}" style="flex:1;padding:10px;border:1px solid var(--line);border-radius:9px;font-size:15px">
         <button class="btn" data-confirm-lot="${esc(l.id)}" style="flex:0 0 auto">${esc(T("पुष्टि","Confirm"))}</button>
       </div>
     </div>`).join("") || `<div class="card"><p>${esc(T("सबै लट पुष्टि भइसके","All lots confirmed"))}</p></div>`}
@@ -3102,7 +3144,7 @@ function viewAdminOffers(){
         <button class="btn ghost" data-decide-offer="${o.id}" data-decision="rejected" style="flex:1;padding:8px">✕ ${esc(T("अस्वीकार","Reject"))}</button>
       </div>
       <div style="display:flex;gap:6px;margin-top:6px">
-        <input id="counter-${o.id}" type="number" min="1" placeholder="${esc(T("काउन्टर भाउ Rs/kg","Counter Rs/kg"))}" style="flex:2;padding:8px;border:1px solid var(--line);border-radius:8px">
+        <input id="counter-${o.id}" type="number" min="1" placeholder="${esc(T("काउन्टर भाउ Rs/kg","Counter Rs/kg"))}" value="${esc(S.adminDrafts["counter-"+o.id]||"")}" style="flex:2;padding:8px;border:1px solid var(--line);border-radius:8px">
         <button class="btn ghost" data-counter-offer="${o.id}" style="flex:1;padding:8px">↩ ${esc(T("काउन्टर","Counter"))}</button>
       </div>
     </div>`;
@@ -3133,6 +3175,7 @@ async function decideOffer(offerId, decision, counterRate){
     const data = await res.json().catch(()=>({}));
     if(checkSession(res)) throw new SessionExpiredError();
     if(!res.ok) throw new Error(data.error || res.status);
+    delete S.adminDrafts["counter-"+offerId];
     adminOffersCache = {data:null, at:0};
     toast(T("फैसला गरियो","Decided"));
   }catch(e){ toast(T("सकिएन: ","Failed: ")+(e.message||"")); }
@@ -3162,14 +3205,14 @@ function viewAdminOrders(){
         ? `<p style="margin-top:6px">✅ ${esc(T("चुक्ता भयो","Settled"))} · ${esc(o.settlement_method||"")} · ${esc(money(o.settled_amount||0))}${o.settlement_reference ? " · "+esc(o.settlement_reference) : ""}</p>`
         : `<p style="margin-top:6px;color:var(--tori-text)">⏳ ${esc(T("भुक्तानी बाँकी","Payment pending"))}</p>
            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-             <input id="settle-amt-${o.id}" type="number" min="0" step="0.01" value="${total(o)}" aria-label="${esc(T("रकम","Amount"))}" style="flex:1;min-width:100px;padding:8px;border:1px solid var(--line);border-radius:8px">
+             <input id="settle-amt-${o.id}" type="number" min="0" step="0.01" value="${esc(S.adminDrafts["settle-amt-"+o.id] ?? total(o))}" aria-label="${esc(T("रकम","Amount"))}" style="flex:1;min-width:100px;padding:8px;border:1px solid var(--line);border-radius:8px">
              <select id="settle-method-${o.id}" aria-label="${esc(T("माध्यम","Method"))}" style="flex:1;min-width:100px;padding:8px;border:1px solid var(--line);border-radius:8px">
                <option value="cash">${esc(T("नगद","Cash"))}</option>
                <option value="bank">${esc(T("बैंक","Bank"))}</option>
                <option value="esewa">eSewa</option>
                <option value="khalti">${esc(T("खल्ती","Khalti"))}</option>
              </select>
-             <input id="settle-ref-${o.id}" type="text" maxlength="80" placeholder="${esc(T("सन्दर्भ (ऐच्छिक)","Reference (optional)"))}" style="flex:1;min-width:120px;padding:8px;border:1px solid var(--line);border-radius:8px">
+             <input id="settle-ref-${o.id}" type="text" maxlength="80" placeholder="${esc(T("सन्दर्भ (ऐच्छिक)","Reference (optional)"))}" value="${esc(S.adminDrafts["settle-ref-"+o.id]||"")}" style="flex:1;min-width:120px;padding:8px;border:1px solid var(--line);border-radius:8px">
              <button class="btn" data-settle-order="${o.id}" style="flex:0 0 auto;padding:8px 14px">💸 ${esc(T("चुक्ता गर्नुहोस्","Settle"))}</button>
            </div>
            <p style="font-size:12px;color:var(--ink-3);margin-top:6px">${esc(T("रकम सहकारीले पाएको/बुझाएको माध्यम मात्र दर्ता हुन्छ — यो अनलाइन भुक्तानी होइन।","This records how the co-op actually received/paid the money — it is not an online payment."))}</p>`}
@@ -3208,6 +3251,8 @@ async function doSettleOrder(orderId){
     const data = await res.json().catch(()=>({}));
     if(checkSession(res)) throw new SessionExpiredError();
     if(!res.ok) throw new Error(data.error || res.status);
+    delete S.adminDrafts["settle-amt-"+orderId];
+    delete S.adminDrafts["settle-ref-"+orderId];
     adminCache = {data:null, at:0}; // overview carries the new status
     toast(T("चुक्ता भयो","Settled"));
   }catch(e){ toast(T("सकिएन: ","Failed: ")+(e.message||"")); }
@@ -3248,6 +3293,7 @@ async function doConfirmLot(lotId){
     const data = await res.json().catch(()=>({}));
     if(checkSession(res)) throw new SessionExpiredError();
     if(!res.ok) throw new Error(data.error || `server ${res.status}`);
+    delete S.adminDrafts["rate-"+lotId];
     adminCache = {data:null, at:0}; // invalidate
     toast(T("लट पुष्टि भयो","Lot confirmed"));
     render({skipScroll:true});
@@ -3494,6 +3540,40 @@ document.addEventListener("change", e=>{
     e.target.value = ""; // allow re-selecting the same file for "retake"
   }
 });
+
+/* ---------- typed input must survive re-renders ----------
+   render() rebuilds the whole DOM from state, so any input whose value
+   lives only in the DOM is wiped by the next render while the user is
+   still typing. Real cases this bit: crop-doctor symptoms vanished when
+   a photo was added (the photo handler re-renders) or a crop was
+   tapped; the register-form name vanished on a role toggle; the admin
+   login lost username AND password on every failed attempt; a counter
+   rate / settle amount vanished when a background refresh landed.
+   One delegated `input` listener keeps the state copy live, and every
+   render function above reads its value back from that state — the
+   submit handlers keep reading the DOM, unchanged. */
+function syncDraftInput(e){
+  const t = e && e.target;
+  if(!t || !t.id) return;
+  const v = t.value;
+  switch(t.id){
+    case "doctorSymptoms": doctor.symptoms = v; return;
+    case "regName": account.regName = v; return;
+    case "auth-phone": account.phone = v; return;
+    case "auth-code": account.codeDraft = v; return;
+    case "auth-name": account.name = v; return;
+    case "admin-user": account.adminUser = v; return;
+    case "admin-pass": account.adminPass = v; return;
+    case "offerRate": if(S.offerDialog) S.offerDialog.rate = v; return;
+    case "offerQty": if(S.offerDialog) S.offerDialog.qty = v; return;
+    default:
+      if(t.id.startsWith("counter-") || t.id.startsWith("settle-amt-") ||
+         t.id.startsWith("settle-ref-") || t.id.startsWith("rate-")){
+        S.adminDrafts[t.id] = v;
+      }
+  }
+}
+document.addEventListener("input", syncDraftInput);
 
 render();
 loadLots().then(()=>{ if(S.role==="buyer") render({skipScroll:true}); });
