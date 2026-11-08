@@ -73,13 +73,24 @@
 <script src="chat.js"></script>
 <script>
 let pendingPhone = "";
+// No double-tap on either OTP step: request-code mints a new code and
+// RETIRES the previous one, so a double-tapped "Send OTP" left the
+// user staring at a code that no longer verifies (401), and burned 2
+// of the 3-per-10-min per-phone allowance. A double-tapped verify
+// fired a second POST whose 401 landed after the redirect. Extra taps
+// while a request is in flight are now dropped; the flags reset in
+// finally so a failed attempt stays retryable.
+let sendingOTP = false;
+let verifyingOTP = false;
 async function sendOTP(){
+  if(sendingOTP) return;
   const phone = document.getElementById("login-phone").value.trim();
   const msg = document.getElementById("login-msg");
   if(!/^9[678]\d{8}$/.test(phone)){
     msg.textContent = LANG==="ne" ? "सही १० अंकको मोबाइल नम्बर हाल्नुहोस्" : "Enter a valid 10-digit mobile number";
     return;
   }
+  sendingOTP = true;
   msg.textContent = LANG==="ne" ? "पठाउँदै…" : "Sending…";
   try{
     const r = await fetch(API + "/v1/auth/request-code", {
@@ -107,9 +118,13 @@ async function sendOTP(){
     document.getElementById("login-otp").focus();
   }catch(e){
     msg.textContent = LANG==="ne" ? "त्रुटि: " + e.message : "Error: " + e.message;
+  }finally{
+    sendingOTP = false;
   }
 }
 async function verifyOTP(){
+  if(verifyingOTP) return;
+  verifyingOTP = true;
   const code = document.getElementById("login-otp").value.trim();
   const msg = document.getElementById("login-msg");
   msg.textContent = LANG==="ne" ? "जाँच्दै…" : "Verifying…";
@@ -144,12 +159,17 @@ async function verifyOTP(){
     window.location.href = "account.html";
   }catch(e){
     msg.textContent = (LANG==="ne" ? "त्रुटि: " : "Error: ") + e.message;
+  }finally{
+    verifyingOTP = false;
   }
 }
 function backToPhone(){
   document.getElementById("step-otp").style.display = "none";
   document.getElementById("step-phone").style.display = "block";
   document.getElementById("login-msg").textContent = "";
+  // Clear the typed code: it belongs to the previous number, and
+  // verifying it against a re-entered number can only 401.
+  document.getElementById("login-otp").value = "";
 }
 // Enter submits on both steps
 document.getElementById("login-phone").addEventListener("keydown", e=>{ if(e.key==="Enter") sendOTP(); });

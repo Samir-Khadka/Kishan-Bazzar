@@ -149,6 +149,10 @@
       if(d.session_id) sessionId = d.session_id;
     }catch(e){
       typing.remove();
+      // Put the message back in the input: the user typed it once and
+      // it is already shown as their bubble, but without this they
+      // would have to retype it to retry the send.
+      input.value = text;
       const ne = (typeof LANG !== "undefined" ? LANG : "ne") === "ne";
       addMsg(ne ? "माफ गर्नुहोस्, जडान हुन सकेन।" : "Sorry, could not connect.", "bot");
     }finally{

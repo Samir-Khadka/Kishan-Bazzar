@@ -154,13 +154,31 @@ async function loadStats(){
 }
 function set(id, v){ const el = document.getElementById(id); if(el) el.textContent = v; }
 
+// One in-flight /v1/market/lots fetch, shared by the market list and
+// the home preview: applyLang() re-renders both on every NE<->EN
+// toggle, so rapid toggling used to fire a parallel fetch per toggle —
+// and a failed fetch resolving after a good one overwrote the cards
+// with an error. Concurrent callers share the promise and render in
+// the language current at resolve time; a later call, after it
+// settles, fetches fresh data (same pattern as account.html's load
+// guard). The promise clears itself in finally, so a failure stays
+// retryable instead of caching the error.
+let _marketLotsPromise = null;
+async function fetchMarketLots(){
+  if(!_marketLotsPromise){
+    _marketLotsPromise = api("/v1/market/lots");
+    _marketLotsPromise = _marketLotsPromise.finally(()=>{ _marketLotsPromise = null; });
+  }
+  return _marketLotsPromise;
+}
+
 async function loadLotPreview(){
   const box = document.getElementById("lot-preview");
   if(!box) return;
   try{
     // /v1/market/lots is the buyer-facing list of ready lots (flat array,
     // no pagination trap — unlike /v1/lots, which only returns page 1).
-    const lots = await api("/v1/market/lots");
+    const lots = await fetchMarketLots();
     const ready = (lots||[]).slice(0,6);
     box.innerHTML = ready.length ? ready.map(lotCard).join("")
       : `<p class="muted">${LANG==="ne"?"अहिले कुनै लट छैन।":"No lots right now."}</p>`;
@@ -172,7 +190,7 @@ async function loadLotPreview(){
 async function loadMarketLots(box){
   try{
     // Buyer-facing ready-lots list (flat array, no pagination trap).
-    const lots = await api("/v1/market/lots");
+    const lots = await fetchMarketLots();
     const ready = (lots||[]).filter(l=>l.status==="ready");
     box.innerHTML = ready.length ? ready.map(lotCard).join("")
       : `<div class="empty">

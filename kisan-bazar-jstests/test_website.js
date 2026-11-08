@@ -437,6 +437,141 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
           chatJs.includes("let sending = false;") &&
           /if\s*\(!text\s*\|\|\s*sending\)\s*return;/.test(chatJs) &&
           /finally\s*\{\s*sending = false;/.test(chatJs));
+    const catchIdx = chatJs.indexOf("}catch(e){");
+    const restoreIdx = chatJs.indexOf("input.value = text;");
+    const sorryIdx = chatJs.indexOf("Sorry, could not connect.");
+    check("chat.js restores the typed message when a send fails (retry without retyping)",
+          catchIdx !== -1 && restoreIdx > catchIdx && restoreIdx !== -1 && sorryIdx !== -1 && restoreIdx < sorryIdx);
+  }
+
+  console.log("\n=== website login: double-tap on the OTP steps fires only once (2026-11-08) ===");
+  {
+    // request-code mints a new code and RETIRES the previous one, so a
+    // double-tapped "Send OTP" left the user typing a code that no
+    // longer verifies (401) — and burned 2 of the 3-per-10-min
+    // allowance. A double-tapped verify fired a second POST whose 401
+    // landed after the redirect. Both steps now drop extra taps while
+    // one request is in flight; a failed attempt stays retryable.
+    const counts = { code: 0, verify: 0, dev: 0 };
+    let releaseCode, releaseVerify, holdCode = true, holdVerify = true;
+    const fetchImpl = async (url, opts = {}) => {
+      const u = String(url);
+      if (u.includes("/v1/auth/request-code")) {
+        counts.code++;
+        if (holdCode) await new Promise(res => { releaseCode = res; });
+        return { ok: true, status: 200, json: async () => ({ message: "sent" }) };
+      }
+      if (u.includes("/v1/dev/latest-code/")) { counts.dev++; return { ok: true, status: 200, json: async () => ({ code: "123456" }) }; }
+      if (u.includes("/v1/auth/verify")) {
+        counts.verify++;
+        if (holdVerify) await new Promise(res => { releaseVerify = res; });
+        return { ok: true, status: 200, json: async () => ({ token: "tok-website" }) };
+      }
+      if (u.includes("/v1/me")) return { ok: true, status: 200, json: async () => ({ phone: "9841000001", name: "Sarita Tamang", role: "farmer", coop_id: "kavre-veg", isStaff: false }) };
+      throw new Error("unexpected fetch " + u);
+    };
+    const ctx = makeContext({ fetchImpl });
+    for (const s of inlineScripts(loginHtml)) vm.runInContext(s, ctx.sandbox, { filename: "login-inline.js" });
+    ctx.els["login-phone"].value = "9841000001";
+    run(ctx, "sendOTP()");
+    run(ctx, "sendOTP()"); // double-tap while the first request is in flight
+    await sleep(10);
+    check("double-tap on Send OTP mints exactly one code", counts.code === 1, JSON.stringify(counts));
+    releaseCode(); holdCode = false;
+    await sleep(30);
+    check("OTP step revealed after the single mint",
+          ctx.els["step-otp"].style.display === "block");
+    check("demo code shown is the one live code (123456)",
+          String(ctx.els["login-msg"].textContent || "").includes("123456"),
+          String(ctx.els["login-msg"].textContent));
+    // A later send (after the first settled) still works — the guard
+    // is an in-flight guard, not a one-shot lock.
+    run(ctx, "sendOTP()");
+    await sleep(30);
+    check("a later Send OTP after settle mints again (retryable)",
+          counts.code === 2, JSON.stringify(counts));
+    ctx.els["login-otp"].value = "123456";
+    run(ctx, "verifyOTP()");
+    run(ctx, "verifyOTP()"); // double-tap while the first verify is in flight
+    await sleep(10);
+    check("double-tap on Log in verifies exactly once", counts.verify === 1, JSON.stringify(counts));
+    releaseVerify(); holdVerify = false;
+    await sleep(30);
+    check("verify still lands on account.html",
+          ctx.sandbox.window.location.href === "account.html",
+          ctx.sandbox.window.location.href);
+    // Going back to the phone step clears the typed code: it belongs
+    // to the previous number and can only 401 against a new one.
+    ctx.els["login-otp"].value = "123456";
+    run(ctx, "backToPhone()");
+    check("back to phone clears the typed OTP code",
+          ctx.els["login-otp"].value === "", JSON.stringify(ctx.els["login-otp"].value));
+  }
+
+  console.log("\n=== site.js: market lots fetch shared across concurrent callers (2026-11-08) ===");
+  {
+    // applyLang() re-renders the market list / home preview on every
+    // NE<->EN toggle, so rapid toggling fired a parallel
+    // /v1/market/lots fetch per toggle — and a failed fetch resolving
+    // after a good one overwrote the cards with an error. Concurrent
+    // callers now share one in-flight fetch; a later call after it
+    // settles fetches fresh data, and a failure stays retryable.
+    const lots = [{ id: "KAV-101", crop_code: "GOLB", pooled_kg: 120, status: "ready", rate_per_kg: 45 }];
+    const counts = { lots: 0 };
+    let releaseLots, holdLots = true;
+    const fetchImpl = async (url) => {
+      if (String(url).includes("/v1/market/lots")) {
+        counts.lots++;
+        if (holdLots) await new Promise(res => { releaseLots = res; });
+        return { ok: true, status: 200, json: async () => lots };
+      }
+      throw new Error("unexpected fetch " + url);
+    };
+    const ctx = makeContext({ fetchImpl });
+    run(ctx, "loadMarketLots(document.getElementById('market-lots'))");
+    run(ctx, "loadLotPreview()");
+    await sleep(10);
+    check("concurrent market + preview calls share one /v1/market/lots fetch",
+          counts.lots === 1, JSON.stringify(counts));
+    releaseLots(); holdLots = false;
+    await sleep(30);
+    check("market list renders the shared lots",
+          String(ctx.els["market-lots"].innerHTML || "").includes("गोलभेँडा"),
+          String(ctx.els["market-lots"].innerHTML || ""));
+    check("home preview renders the same shared lots",
+          String(ctx.els["lot-preview"].innerHTML || "").includes("गोलभेँडा"),
+          String(ctx.els["lot-preview"].innerHTML || ""));
+    run(ctx, "loadMarketLots(document.getElementById('market-lots'))");
+    await sleep(30);
+    check("a later call after settle fetches fresh data",
+          counts.lots === 2, JSON.stringify(counts));
+  }
+  {
+    // A failed fetch must not poison the shared promise: the next
+    // call retries instead of replaying the error.
+    const counts = { lots: 0 };
+    let failFirst = true;
+    const fetchImpl = async (url) => {
+      if (String(url).includes("/v1/market/lots")) {
+        counts.lots++;
+        if (failFirst) { failFirst = false; throw new Error("network down"); }
+        return { ok: true, status: 200, json: async () => ([{ id: "KAV-101", crop_code: "GOLB", pooled_kg: 120, status: "ready", rate_per_kg: 45 }]) };
+      }
+      throw new Error("unexpected fetch " + url);
+    };
+    const ctx = makeContext({ fetchImpl });
+    run(ctx, "loadMarketLots(document.getElementById('market-lots'))");
+    await sleep(30);
+    check("failed market fetch renders the load error, not a crash",
+          String(ctx.els["market-lots"].innerHTML || "").includes("लोड हुन सकेन"),
+          String(ctx.els["market-lots"].innerHTML || ""));
+    run(ctx, "loadMarketLots(document.getElementById('market-lots'))");
+    await sleep(30);
+    check("a call after a failure retries the fetch (no cached error)",
+          counts.lots === 2, JSON.stringify(counts));
+    check("the retry renders the lots",
+          String(ctx.els["market-lots"].innerHTML || "").includes("गोलभेँडा"),
+          String(ctx.els["market-lots"].innerHTML || ""));
   }
 
   console.log(`\n${passed} passed, ${failed} failed.`);
