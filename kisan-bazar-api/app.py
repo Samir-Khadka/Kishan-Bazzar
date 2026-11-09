@@ -47,6 +47,16 @@ import db
 
 app = Flask(__name__)
 
+# Request bodies in this API are small JSON documents — the largest
+# legitimate field is a 2000-char symptom description. Cap them at
+# 1 MB: with no limit Flask parses arbitrarily large bodies into
+# memory, so one unauthenticated multi-hundred-MB POST (verified
+# live: a 50 MB body to /v1/auth/request-code got a 200) could OOM
+# the single free-tier worker and take the API down for everyone.
+# Oversized bodies get a 413 before any handler runs (see the
+# handler below), so no endpoint ever sees them.
+app.config["MAX_CONTENT_LENGTH"] = 1_000_000
+
 
 # ---------------- startup: ensure schema + demo seed ----------------
 # This lives in app.py (not just wsgi.py) so the database is ready no
@@ -84,6 +94,14 @@ _ensure_db_ready()
 
 
 # ---------------- error handling: never leak internals ----------------
+@app.errorhandler(413)
+def handle_request_too_large(e):
+    # MAX_CONTENT_LENGTH (above) fires before any handler runs; answer
+    # with the same JSON shape as every other client error, not
+    # Werkzeug's default HTML page.
+    return jsonify({"error": "request body too large (limit 1 MB)"}), 413
+
+
 @app.errorhandler(Exception)
 def handle_unexpected_error(e):
     # Deliberately generic — this fires regardless of Flask's debug flag,

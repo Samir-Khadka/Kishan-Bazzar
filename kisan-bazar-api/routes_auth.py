@@ -98,8 +98,17 @@ def admin_login():
     if not auth.check_rate_limit(f"admin-login:{request.remote_addr}", max_attempts=10, window_seconds=600):
         return jsonify({"error": "too many attempts, try again later"}), 429
     body = request.get_json(force=True, silent=True) or {}
-    username = (body.get("username") or "").strip()
-    password = body.get("password") or ""
+    # Wrong-type credentials used to 500 (.strip()/.encode() on a
+    # number/list) on this public endpoint — anyone could trigger a
+    # 500 without logging in. Non-strings are simply not valid
+    # credentials: same 401 shape as a wrong password, no leak about
+    # which field or why.
+    raw_user = body.get("username")
+    raw_pass = body.get("password")
+    if not isinstance(raw_user, str) or not isinstance(raw_pass, str):
+        return jsonify({"error": "invalid credentials"}), 401
+    username = raw_user.strip()
+    password = raw_pass
     expected_user = os.environ.get("KISAN_ADMIN_USER", "admin" if DEMO_MODE else "")
     expected_pass = os.environ.get("KISAN_ADMIN_PASS", "kisan123" if DEMO_MODE else "")
     # FAIL CLOSED on misconfiguration: if either credential is unset/
@@ -140,6 +149,11 @@ def verify():
     code = body.get("code")
     if not phone or not code:
         return jsonify({"error": "phone and code are required"}), 400
+    # A non-string phone (JSON list/object) used to 500 in verify_code:
+    # SQLite cannot bind a list as a query parameter. Wrong-type input
+    # on this unauthenticated endpoint gets an honest 400 instead.
+    if not isinstance(phone, str):
+        return jsonify({"error": "phone must be a string"}), 400
 
     # rate-limited per phone: at most 5 verify attempts per 10 minutes —
     # 6-digit codes expire in 5 minutes, so this bounds any brute-force

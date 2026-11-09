@@ -192,8 +192,17 @@ def assistant_chat():
     Rate-limited per IP to prevent abuse.
     """
     body = request.get_json(force=True, silent=True) or {}
-    message = (body.get("message") or "").strip()
-    session_id = (body.get("session_id") or request.remote_addr or "anon")[:64]
+    # A JSON value of the wrong type used to 500 here: .strip() on a
+    # number/list, or a list session_id used as a dict key. These are
+    # unauthenticated inputs, so anyone could trigger 500s (and log
+    # noise) with one malformed request — answer 400 instead.
+    raw_message = body.get("message")
+    if not isinstance(raw_message, str):
+        return jsonify({"error": "message is required"}), 400
+    message = raw_message.strip()
+    raw_session = body.get("session_id")
+    session_id = (raw_session if isinstance(raw_session, str)
+                  else request.remote_addr or "anon")[:64]
     if not message:
         return jsonify({"error": "message is required"}), 400
     if len(message) > 500:
