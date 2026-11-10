@@ -159,15 +159,22 @@ def farmer_dues(conn, phone):
     pooled_kg), split by whether the order has a settlement row.
     'pending' is what buyers' orders still owe the pool; 'settled'
     is the share of orders staff have recorded as paid.
+
+    The query drives FROM the farmer's listings (idx_listings_farmer_created)
+    through lot_listings (idx_lot_listings_listing) to lots and orders —
+    every step is an index seek. The old shape drove from orders and
+    joined lot_listings last, which EXPLAIN showed as a full SCAN of
+    lot_listings on every ledger/dues read; the row set is identical
+    (same (order, lot_listing) pairs for this farmer, same proration).
     """
     rows = conn.execute(
         "SELECT o.quantity_kg AS qty, o.unit_rate AS rate, "
         "ll.kg_contributed AS contrib, lot.pooled_kg AS pooled, "
         "(s.id IS NOT NULL) AS is_settled "
-        "FROM orders o "
-        "JOIN lots lot ON lot.id = o.lot_id "
-        "JOIN lot_listings ll ON ll.lot_id = lot.id "
-        "JOIN listings li ON li.id = ll.listing_id "
+        "FROM listings li "
+        "JOIN lot_listings ll ON ll.listing_id = li.id "
+        "JOIN lots lot ON lot.id = ll.lot_id "
+        "JOIN orders o ON o.lot_id = lot.id "
         "LEFT JOIN order_settlements s ON s.order_id = o.id "
         "WHERE li.farmer_phone=?",
         (phone,),
@@ -270,10 +277,12 @@ def admin_overview(conn):
     }
 
 
-def listings_for_farmer(conn, phone):
+def listings_for_farmer(conn, phone, limit=200):
+    """A farmer's own listings, newest first, capped: the endpoint
+    used to return every listing the farmer ever made, unbounded."""
     return conn.execute(
         "SELECT * FROM listings WHERE farmer_phone=? "
-        "ORDER BY created_at DESC", (phone,)).fetchall()
+        "ORDER BY created_at DESC LIMIT ?", (phone, limit)).fetchall()
 
 
 def lots_page(conn, coop_id, status, limit, offset):
@@ -394,14 +403,17 @@ def list_offers(conn, *, is_staff, phone, lot_id, buyer_phone):
     return conn.execute(q, params).fetchall()
 
 
-def list_rentals(conn, machine_type, location):
+def list_rentals(conn, machine_type, location, limit=200):
     q = "SELECT * FROM rentals WHERE available=1"
     params = []
     if machine_type:
         q += " AND machine_type=?"; params.append(machine_type)
     if location:
         q += " AND location LIKE ?"; params.append(f"%{location}%")
-    q += " ORDER BY created_at DESC"
+    # Capped: this is an unauthenticated list, and it used to dump
+    # every available rental with no limit at all.
+    q += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
     return conn.execute(q, params).fetchall()
 
 
@@ -413,11 +425,13 @@ def latest_land_scan(conn, phone):
     ).fetchone()
 
 
-def land_scan_history(conn, phone):
+def land_scan_history(conn, phone, limit=200):
+    """Full scan history, newest first — capped at 200 rows: a farmer
+    rescanning every season used to make this grow without bound."""
     return conn.execute(
         "SELECT * FROM land_scans WHERE farmer_phone=? "
-        "ORDER BY created_at DESC, id DESC",
-        (phone,),
+        "ORDER BY created_at DESC, id DESC LIMIT ?",
+        (phone, limit),
     ).fetchall()
 
 

@@ -186,7 +186,14 @@ def serve_root():
 def serve_app():
     html_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kisan-bazar.html")
     if os.path.exists(html_path):
-        return send_file(html_path)
+        # 222 KB single-file app, re-downloaded on every visit until
+        # now: Flask's send_file defaults to Cache-Control: no-cache,
+        # so every navigation paid a revalidation round-trip for the
+        # whole file. One hour of browser caching is safe (deploys are
+        # infrequent) and removes that round-trip for repeat visits.
+        resp = send_file(html_path)
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
     return jsonify({"service": "kisan-bazar-api", "status": "running"})
 
 
@@ -204,7 +211,13 @@ def serve_site(filename="index.html"):
     full = os.path.join(site_dir, filename)
     if not os.path.isfile(full) or not os.path.realpath(full).startswith(os.path.realpath(site_dir)):
         return send_from_directory(site_dir, "404.html"), 404
-    return send_from_directory(site_dir, filename)
+    # Same no-cache default as /app (see serve_app): a 12-page site
+    # revalidating every asset on every navigation. One hour is safe
+    # for these rarely-changing pages; API JSON keeps no-store via
+    # the after_request hook, which only fills in a missing header.
+    resp = send_from_directory(site_dir, filename)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
 
 
 # ---------------- route blueprints ----------------

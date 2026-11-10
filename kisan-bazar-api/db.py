@@ -264,8 +264,31 @@ def init_db(fresh: bool = False):
     # Indexes for common query patterns — without these, every list endpoint
     # does a full table scan. Critical as data grows.
     for idx_sql in [
-        "CREATE INDEX IF NOT EXISTS idx_listings_farmer ON listings(farmer_phone)",
+        # Pooling path (aggregation.open_listings_in_radius, run after
+        # EVERY new listing): the old single-column crop index made
+        # SQLite fetch every listing of that crop, then filter
+        # coop/grade/status in memory. This composite turns the
+        # coop+crop+grade+status lookup into one index seek.
+        "CREATE INDEX IF NOT EXISTS idx_listings_pool ON listings(coop_id, crop_code, grade, status)",
+        # idx_listings_farmer is redundant: (farmer_phone, created_at
+        # DESC) covers every farmer-only lookup as a leftmost prefix
+        # AND serves the ORDER BY in listings_for_farmer /
+        # diagnoses_for_farmer without a temp B-tree sort. Drop the
+        # single-column index so writes don't maintain both.
+        "CREATE INDEX IF NOT EXISTS idx_listings_farmer_created ON listings(farmer_phone, created_at DESC)",
+        "DROP INDEX IF EXISTS idx_listings_farmer",
         "CREATE INDEX IF NOT EXISTS idx_listings_crop ON listings(crop_code)",
+        "CREATE INDEX IF NOT EXISTS idx_diagnoses_farmer_created ON diagnoses(farmer_phone, created_at DESC)",
+        "DROP INDEX IF EXISTS idx_diagnoses_farmer",
+        # farmer_dues used to full-scan lot_listings (EXPLAIN: SCAN ll)
+        # because the only index was the (lot_id, listing_id) PK and
+        # the query drove from orders. With this index the rewritten
+        # query walks farmer -> listings -> lot_listings by index.
+        "CREATE INDEX IF NOT EXISTS idx_lot_listings_listing ON lot_listings(listing_id)",
+        # Rentals list is ordered by created_at within available=1;
+        # without this the endpoint scanned the whole table and sorted
+        # in a temp B-tree on every (unauthenticated) call.
+        "CREATE INDEX IF NOT EXISTS idx_rentals_available_created ON rentals(available, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_lots_status_created ON lots(status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_lots_coop ON lots(coop_id)",
         "CREATE INDEX IF NOT EXISTS idx_lots_crop_created ON lots(crop_code, created_at)",
@@ -273,7 +296,6 @@ def init_db(fresh: bool = False):
         "CREATE INDEX IF NOT EXISTS idx_orders_lot ON orders(lot_id)",
         "CREATE INDEX IF NOT EXISTS idx_offers_lot ON offers(lot_id)",
         "CREATE INDEX IF NOT EXISTS idx_offers_buyer ON offers(buyer_phone)",
-        "CREATE INDEX IF NOT EXISTS idx_diagnoses_farmer ON diagnoses(farmer_phone)",
         "CREATE INDEX IF NOT EXISTS idx_rentals_type ON rentals(machine_type)",
         "CREATE INDEX IF NOT EXISTS idx_bookings_rental ON rental_bookings(rental_id)",
         # The idempotent() decorator deletes expired keys on EVERY guarded
