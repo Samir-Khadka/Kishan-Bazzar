@@ -10,7 +10,7 @@ import availability
 import db
 import repositories
 from web import (DEFAULT_TARGET_KG, MAX_REASONABLE_KG, idempotent,
-                 is_valid_nepali_mobile, parse_number, reject,
+                 is_valid_nepali_mobile, json_body, parse_number, reject,
                  require_auth, require_self, require_staff,
                  valid_positive_kg, valid_positive_number)
 
@@ -22,7 +22,7 @@ bp = Blueprint("market", __name__)
 @require_self("farmer_phone")
 @idempotent
 def create_listing():
-    body = request.get_json(force=True)
+    body = json_body()
     required = ["farmer_phone", "coop_id", "crop_code", "grade", "quantity_kg"]
     missing = [f for f in required if f not in body]
     if missing:
@@ -127,7 +127,7 @@ def get_lot(lot_id):
 @require_auth
 @require_staff
 def confirm_lot(lot_id):
-    body = request.get_json(force=True)
+    body = json_body()
     if "rate_per_kg" not in body:
         return jsonify({"error": "rate_per_kg required"}), 400
     rate = body["rate_per_kg"]
@@ -181,7 +181,7 @@ def place_order():
     # buyer's token after login and sends it here.
     if not auth.check_rate_limit(f"order:{request.remote_addr}", max_attempts=10, window_seconds=600):
         return jsonify({"error": "too many orders, try again later"}), 429
-    body = request.get_json(force=True)
+    body = json_body()
     required = ["buyer_name", "buyer_phone", "lot_id", "quantity_kg"]
     missing = [f for f in required if f not in body]
     if missing:
@@ -251,7 +251,7 @@ def settle_order(order_id):
     a 409. The check-and-insert runs under BEGIN IMMEDIATE, so two
     staff settling the same order concurrently can't double-record.
     """
-    body = request.get_json(force=True, silent=True) or {}
+    body = json_body()
     method = (body.get("method") or "").strip().lower()
     if method not in repositories.SETTLEMENT_METHODS:
         return jsonify({
@@ -309,7 +309,7 @@ def make_offer():
     per IP."""
     if not auth.check_rate_limit(f"offer:{request.remote_addr}", max_attempts=10, window_seconds=600):
         return jsonify({"error": "too many offers, try again later"}), 429
-    body = request.get_json(force=True, silent=True) or {}
+    body = json_body()
     required = ["buyer_name", "buyer_phone", "lot_id", "bid_rate_per_kg", "quantity_kg"]
     missing = [f for f in required if f not in body]
     if missing:
@@ -377,7 +377,7 @@ def decide_offer(offer_id):
     """Co-op staff accepts, rejects, or counters an offer.
     Body: {"decision": "accepted"|"rejected"|"countered", "counter_rate_per_kg": N}
     Accepted offers convert to real orders."""
-    body = request.get_json(force=True, silent=True) or {}
+    body = json_body()
     decision = (body.get("decision") or "").strip().lower()
     if decision not in ("accepted", "rejected", "countered"):
         return jsonify({"error": "decision must be accepted, rejected, or countered"}), 400

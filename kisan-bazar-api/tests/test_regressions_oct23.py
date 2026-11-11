@@ -281,20 +281,35 @@ def run():
 
     # ---------- G. rentals lifecycle ----------
     print("\n=== G. Rentals: overlap, confirm, cancel ===")
+    # Booking dates are relative to TODAY in Nepal time: the endpoint
+    # rejects past dates (Nov 7 fix), so the hardcoded 2026-11-10/11/12
+    # dates this block used to carry went stale the day after they were
+    # written and the "first booking -> 201" check started failing on
+    # 2026-11-11. The geometry is unchanged: first booking [d+1, d+3),
+    # overlap attempt on d+2, adjacent booking starting d+3.
+    from datetime import datetime, timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        _today = datetime.now(ZoneInfo("Asia/Kathmandu")).date()
+    except Exception:
+        _today = datetime.now().date()
+    d1 = (_today + timedelta(days=1)).isoformat()
+    d2 = (_today + timedelta(days=2)).isoformat()
+    d3 = (_today + timedelta(days=3)).isoformat()
     conn = db.get_db()
     rental = conn.execute(
         "SELECT * FROM rentals WHERE machine_type='power_tiller' AND available=1").fetchone()
     conn.close()
     rid, owner = rental["id"], rental["owner_phone"]
     r = client.post(f"/v1/rentals/{rid}/book",
-                    json={"days": 2, "book_date": "2026-11-10"}, headers=tok(SARITA))
+                    json={"days": 2, "book_date": d1}, headers=tok(SARITA))
     check("first booking -> 201", r.status_code == 201, r.get_json())
     booking1 = r.get_json()["booking_id"]
     r = client.post(f"/v1/rentals/{rid}/book",
-                    json={"days": 1, "book_date": "2026-11-11"}, headers=tok(MINA))
+                    json={"days": 1, "book_date": d2}, headers=tok(MINA))
     check("overlapping booking -> 409", r.status_code == 409, r.get_json())
     r = client.post(f"/v1/rentals/{rid}/book",
-                    json={"days": 1, "book_date": "2026-11-12"}, headers=tok(MINA))
+                    json={"days": 1, "book_date": d3}, headers=tok(MINA))
     check("adjacent booking (starts the day the other ends) -> 201",
           r.status_code == 201, r.get_json())
     booking2 = r.get_json()["booking_id"]
@@ -312,7 +327,7 @@ def run():
     r = client.post(f"/v1/rentals/bookings/{booking2}/cancel", headers=tok(MINA))
     check("booker cancels -> 200", r.status_code == 200, r.get_json())
     r = client.post(f"/v1/rentals/{rid}/book",
-                    json={"days": 1, "book_date": "2026-11-12"}, headers=tok(KRISHNA))
+                    json={"days": 1, "book_date": d3}, headers=tok(KRISHNA))
     check("cancelled dates are bookable again -> 201",
           r.status_code == 201, r.get_json())
 

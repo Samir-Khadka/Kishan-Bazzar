@@ -10,14 +10,14 @@ import auth
 import db
 import messaging
 import repositories
-from web import DEMO_MODE, parse_number, require_auth, require_self
+from web import DEMO_MODE, json_body, parse_number, require_auth, require_self
 
 bp = Blueprint("auth", __name__)
 
 
 @bp.post("/v1/auth/request-code")
 def request_code():
-    body = request.get_json(force=True, silent=True) or {}
+    body = json_body()
     phone = body.get("phone")
     if not phone or not isinstance(phone, str):
         return jsonify({"error": "phone is required"}), 400
@@ -97,7 +97,7 @@ def admin_login():
     # guess past the limit gets 429 instead of another try.
     if not auth.check_rate_limit(f"admin-login:{request.remote_addr}", max_attempts=10, window_seconds=600):
         return jsonify({"error": "too many attempts, try again later"}), 429
-    body = request.get_json(force=True, silent=True) or {}
+    body = json_body()
     # Wrong-type credentials used to 500 (.strip()/.encode() on a
     # number/list) on this public endpoint — anyone could trigger a
     # 500 without logging in. Non-strings are simply not valid
@@ -144,7 +144,7 @@ def admin_login():
 
 @bp.post("/v1/auth/verify")
 def verify():
-    body = request.get_json(force=True, silent=True) or {}
+    body = json_body()
     phone = body.get("phone")
     code = body.get("code")
     if not phone or not code:
@@ -183,7 +183,7 @@ def signup():
     'staff' (admin) is NEVER self-granted — staff accounts are created
     manually out-of-band by existing staff.
     """
-    body = request.get_json(force=True, silent=True) or {}
+    body = json_body()
     phone = (body.get("phone") or "").strip()
     name = (body.get("name") or "").strip()
     role = (body.get("role") or "farmer").strip().lower()

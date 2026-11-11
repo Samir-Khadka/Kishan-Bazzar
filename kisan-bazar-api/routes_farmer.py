@@ -7,7 +7,7 @@ from flask import Blueprint, g, jsonify, request
 import auth
 import db
 import repositories
-from web import require_auth, require_self
+from web import json_body, require_auth, require_self
 
 bp = Blueprint("farmer", __name__)
 
@@ -24,7 +24,7 @@ def save_land_scan(phone):
     itself is never sent here or stored — only the derived signals (colour
     bucket, texture answer, drainage answer) and the resulting land type,
     so this endpoint carries no image data or privacy/storage burden."""
-    body = request.get_json(force=True)
+    body = json_body()
     if "land_type" not in body or "confidence" not in body:
         return jsonify({"error": "land_type and confidence are required"}), 400
     if body["land_type"] not in VALID_LAND_TYPES:
@@ -119,7 +119,7 @@ def crop_doctor_diagnose():
     # the table. 20 per 10 minutes is plenty for interactive use.
     if not auth.check_rate_limit(f"diagnose:{request.remote_addr}", max_attempts=20, window_seconds=600):
         return jsonify({"error": "too many requests, slow down"}), 429
-    body = request.get_json(force=True, silent=True) or {}
+    body = json_body()
     crop_code = (body.get("crop_code") or "").strip().upper()
     symptoms = (body.get("symptoms") or "").strip()
     # Free-text fields are stored verbatim — bound them against DB bloat.

@@ -34,6 +34,15 @@ def farmer_is_staff(conn, phone):
     return bool(row and row["is_staff"])
 
 
+def farmer_display_name(conn, phone):
+    """The name to show for a farmer, falling back to their phone
+    when they have no profile yet. Two rental handlers hand-rolled
+    this same `me["name"] if me else phone` fallback; one helper
+    keeps the fallback identical everywhere it is used."""
+    row = get_farmer(conn, phone)
+    return row["name"] if row and row["name"] else phone
+
+
 def get_lot(conn, lot_id):
     return conn.execute(
         "SELECT * FROM lots WHERE id=?", (lot_id,)).fetchone()

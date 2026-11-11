@@ -7,7 +7,7 @@ import assistant
 import auth
 import db
 import repositories
-from web import parse_number, reject, require_auth, valid_positive_number
+from web import json_body, parse_number, reject, require_auth, valid_positive_number
 
 bp = Blueprint("services", __name__)
 
@@ -30,7 +30,7 @@ def list_rentals():
 @require_auth
 def create_rental():
     """Owner lists a machine for rent. Auth required."""
-    body = request.get_json(force=True, silent=True) or {}
+    body = json_body()
     mtype = (body.get("machine_type") or "").strip()
     name = (body.get("machine_name") or "").strip()
     location = (body.get("location") or "").strip()
@@ -51,11 +51,10 @@ def create_rental():
     if len(name) > 120 or len(location) > 200 or len(contact) > 32:
         return jsonify({"error": "machine_name/location/contact_phone too long"}), 400
     conn = db.get_db()
-    me = repositories.get_farmer(conn, g.phone)
     cur = conn.execute(
         "INSERT INTO rentals (owner_phone, owner_name, machine_type, machine_name, rate_per_day, location, contact_phone) "
         "VALUES (?,?,?,?,?,?,?)",
-        (g.phone, me["name"] if me else g.phone, mtype, name, rate, location, contact))
+        (g.phone, repositories.farmer_display_name(conn, g.phone), mtype, name, rate, location, contact))
     conn.commit()
     rid = cur.lastrowid
     conn.close()
@@ -73,7 +72,7 @@ def book_rental(rental_id):
     farmers could book the same machine for the same days and all be
     quoted a total. The owner confirms (or the farmer cancels) via
     the lifecycle endpoints below; cancelling frees the dates."""
-    body = request.get_json(force=True, silent=True) or {}
+    body = json_body()
     raw_days = body.get("days")
     # Reject floats/bools outright: int(2.9) used to silently truncate
     # to 2 days, quoting a total the farmer never asked for.
@@ -117,11 +116,10 @@ def book_rental(rental_id):
                 conn,
                 f"machine already booked from {clash['book_date']} "
                 f"for {clash['days']} day(s)", 409)
-        me = repositories.get_farmer(conn, g.phone)
         cur = conn.execute(
             "INSERT INTO rental_bookings (rental_id, farmer_phone, farmer_name, days, book_date) "
             "VALUES (?,?,?,?,?)",
-            (rental_id, g.phone, me["name"] if me else g.phone, days, book_date))
+            (rental_id, g.phone, repositories.farmer_display_name(conn, g.phone), days, book_date))
         conn.commit()
         bid = cur.lastrowid
     finally:
@@ -191,7 +189,7 @@ def assistant_chat():
     otherwise the assistant asks them to log in for those topics.
     Rate-limited per IP to prevent abuse.
     """
-    body = request.get_json(force=True, silent=True) or {}
+    body = json_body()
     # A JSON value of the wrong type used to 500 here: .strip() on a
     # number/list, or a list session_id used as a dict key. These are
     # unauthenticated inputs, so anyone could trigger 500s (and log

@@ -41,6 +41,31 @@ MAX_REASONABLE_KG = 5000
 DEMO_MODE = os.environ.get("KISAN_BAZAR_DEMO_MODE", "").lower() in ("1", "true", "yes")
 
 
+def json_body():
+    """The one canonical way to read a JSON request body: a dict, or
+    {} when the body is missing, malformed, or not a JSON object.
+
+    Fourteen call sites used to spell this three different ways
+    (`get_json(force=True)`, `get_json(force=True, silent=True) or {}`,
+    `get_json(silent=True) or {}`), and the differences were live bugs,
+    not style: a bare `get_json(force=True)` raised BadRequest on a
+    malformed body (Werkzeug's generic "browser sent a request..."
+    text instead of the API's own error wording), and a JSON array /
+    string / number body sailed through `or {}` (truthy non-dicts)
+    and then 500'd on the first `.get()` — verified live on
+    /v1/listings, /v1/orders and /v1/assistant/chat, all public or
+    authenticated write paths anyone could hit with one curl. The
+    dict check here is the fix: handlers only ever see a dict, so a
+    garbage body degrades to their own "missing fields" 400s.
+
+    force=True is kept deliberately: clients (including the app's own
+    fetch calls) don't always set Content-Type: application/json, and
+    refusing to parse those bodies would break legitimate requests.
+    """
+    parsed = request.get_json(force=True, silent=True)
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def require_auth(f):
     """Rejects the request with 401 unless a valid, unexpired bearer
     token is present. On success, g.phone holds the authenticated
@@ -69,7 +94,12 @@ def require_self(phone_arg_name):
         def wrapper(*args, **kwargs):
             target_phone = kwargs.get(phone_arg_name)
             if target_phone is None:
-                body = request.get_json(silent=True) or {}
+                # json_body(), not get_json(silent=True): without
+                # force=True a valid JSON body posted without a
+                # Content-Type header parsed as None here and 403'd
+                # a legitimate caller, while the handler behind it
+                # (force=True) would have parsed it fine.
+                body = json_body()
                 target_phone = body.get(phone_arg_name)
             if target_phone != g.phone:
                 return jsonify({"error": "you can only do this for your own phone number"}), 403

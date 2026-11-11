@@ -12,6 +12,8 @@ equivalent (haversine_km -> ST_DWithin / ST_Distance).
 """
 import math
 
+import repositories
+
 
 def haversine_km(lat1, lon1, lat2, lon2):
     """Great-circle distance in km. Good enough at Nepal's scale — no need
@@ -28,7 +30,7 @@ def open_listings_in_radius(conn, coop_id, crop_code, grade):
     """All open/partially_pooled listings for a crop+grade, filtered to
     farmers within that co-op's collection radius. Mirrors the WHERE
     ST_DWithin(...) clause the real Postgres version would use."""
-    coop = conn.execute("SELECT * FROM cooperatives WHERE id=?", (coop_id,)).fetchone()
+    coop = repositories.get_cooperative(conn, coop_id)
     if not coop:
         return []
     rows = conn.execute(
