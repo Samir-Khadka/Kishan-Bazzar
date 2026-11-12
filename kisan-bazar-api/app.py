@@ -43,6 +43,7 @@ Endpoints:
 import os
 import re
 from flask import Flask, request, jsonify, send_file, redirect
+from werkzeug.exceptions import HTTPException
 import db
 
 app = Flask(__name__)
@@ -108,10 +109,16 @@ def handle_unexpected_error(e):
     # so even a misconfigured deployment (debug left on) doesn't leak a
     # stack trace, file paths, or query text through this path. Flask's
     # own HTTPExceptions (404, etc.) already carry the right status code
-    # via e.code; anything else is an unexpected server error.
-    code = getattr(e, "code", 500)
-    if isinstance(code, int) and 400 <= code < 600:
-        return jsonify({"error": getattr(e, "description", "request failed")}), code
+    # and description; anything else is an unexpected server error.
+    #
+    # The branch must be keyed on the exception TYPE, not on a
+    # getattr default: a plain Exception has no .code, so the old
+    # `getattr(e, "code", 500)` default routed every real 500 into the
+    # HTTPException branch with a fallback "request failed" message,
+    # and the "internal server error" return below was unreachable
+    # for the case it was written for.
+    if isinstance(e, HTTPException):
+        return jsonify({"error": e.description}), e.code
     app.logger.exception("Unhandled error")
     return jsonify({"error": "internal server error"}), 500
 
