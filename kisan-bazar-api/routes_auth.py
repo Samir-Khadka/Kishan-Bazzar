@@ -230,7 +230,26 @@ def signup():
         return jsonify({"error": "unknown coop_id"}), 400
     existing = repositories.get_farmer(conn, phone)
     if existing:
-        conn.execute("UPDATE farmers SET name=?, land_type=?, payout_method=?, role=? WHERE phone=?", (name, land_type, payout_method, role, phone))
+        # Re-registration is also the profile-update path, so the
+        # update must carry the same fields a fresh signup stores:
+        # coop_id/lat/lon used to be silently dropped here (the
+        # caller got a 201 "registered successfully" while their
+        # co-op and map pin never moved — the pin feeds the
+        # aggregation radius, so a stale pin silently excluded the
+        # farmer from pooling). And role must never be overwritten
+        # for a staff account: the old UPDATE set role='farmer'
+        # while is_staff stayed 1, leaving role and is_staff in
+        # disagreement (/v1/me then reported role 'farmer' with
+        # isStaff true, and admin login returned role 'farmer' for
+        # the desk account). Staff keep role='staff'; everyone else
+        # takes the requested farmer/buyer role.
+        new_role = "staff" if existing["is_staff"] else role
+        conn.execute(
+            "UPDATE farmers SET name=?, land_type=?, payout_method=?, "
+            "role=?, coop_id=?, lat=?, lon=? WHERE phone=?",
+            (name, land_type, payout_method, new_role, coop_id,
+             lat, lon, phone))
+        is_staff = bool(existing["is_staff"])
     else:
         conn.execute(
             "INSERT INTO farmers (phone, name, role, coop_id, lat, lon, payout_method, land_type, is_staff) "
@@ -246,7 +265,7 @@ def signup():
         "phone": phone,
         "name": name,
         "token": token,
-        "is_staff": False
+        "is_staff": is_staff
     }), 201
 
 

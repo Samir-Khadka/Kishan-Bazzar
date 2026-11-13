@@ -27,9 +27,14 @@ def seed():
     # co-op staff — same phone used as "Kavre Co-op Desk" in the SMS/USSD
     # project, kept consistent across artifacts. is_staff=1 is what lets
     # this phone (and only this phone) confirm/price lots via the API.
+    # role='staff' is set here, not left to init_db's backfill: the
+    # backfill only runs at app startup, so a DB seeded any other way
+    # (tests, seed.py run directly) left the desk account as
+    # role='farmer' with is_staff=1 — the same role/is_staff split
+    # the signup fix guards against.
     conn.execute(
-        "INSERT INTO farmers (phone, name, coop_id, lat, lon, is_staff) VALUES (?,?,?,?,?,1)",
-        ("9801100000", "Kavre Co-op Desk", "kavre-veg", 27.6215, 85.5442),
+        "INSERT INTO farmers (phone, name, role, coop_id, lat, lon, is_staff) VALUES (?,?,?,?,?,?,1)",
+        ("9801100000", "Kavre Co-op Desk", "staff", "kavre-veg", 27.6215, 85.5442),
     )
 
     # Same 16 crops and the same short codes the app (CROP_API_CODE) and the
