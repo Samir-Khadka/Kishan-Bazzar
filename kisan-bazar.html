@@ -1349,8 +1349,22 @@ function renderPriceTrends(){
   </div>`;
 }
 
+/* Money math over stored offers: a corrupt localStorage entry (missing
+   or non-numeric kg/rate — e.g. written by an older build) used to
+   poison the whole sum with NaN, so the Mine tab showed "रु NaN" and
+   the assistant claimed "no pending payments" while real offers were
+   still pending. Coerce to 0 so one bad row can't blank the ledger. */
+function offerAmount(o){ return (Number(o.kg)||0) * (Number(o.rate)||0); }
+
 function offerRow(o){
   const c=CROPS[o.crop]||CROPS.tomato; // guard: corrupt localStorage shouldn't blank the app
+  const kg = Number(o.kg)||0;
+  // Only the canonical day markers localize. Offers stored before the
+  // 2026-10-20 fix carry a localized day ("आज"/"Today") that would leak
+  // the wrong language into the other UI — an unknown day renders as
+  // nothing rather than as raw stored text.
+  const dayTxt = o.day==="today" ? T("आज","Today")
+               : o.day==="last_week" ? T("गत हप्ता","Last week") : "";
   const st = o.status==="paid" ? ["t-paid", T("भुक्तानी भयो","Paid")]
            : o.status==="lot"  ? ["t-ok",   T("लटमा मिलियो · "+o.lot, "Pooled into "+o.lot)]
                                : ["t-wait", T("सहकारीको जवाफ पर्खंदै","Waiting on co-op")];
@@ -1362,10 +1376,10 @@ function offerRow(o){
                    : o.synced === false ? `<span class="tag t-wait" style="margin-left:5px">${esc(T("स्थानीय मात्र","local only"))}</span>`
                    : "";
   return `<div class="item"><div class="em" aria-hidden="true">${c.ic}</div>
-    <div class="bd"><b>${esc(T(c.ne,c.en))} · ${esc(N(o.kg))} ${esc(T("के.जी.","kg"))}</b>
-      <p>${esc(T("श्रेणी","Grade"))} ${esc(o.grade)} · ${esc(o.day==="today"?T("आज","Today"):o.day==="last_week"?T("गत हप्ता","Last week"):o.day)}</p>
+    <div class="bd"><b>${esc(T(c.ne,c.en))} · ${esc(N(kg))} ${esc(T("के.जी.","kg"))}</b>
+      <p>${esc(T("श्रेणी","Grade"))} ${esc(o.grade||"—")}${dayTxt ? " · " + esc(dayTxt) : ""}</p>
       <span class="tag ${st[0]}">${esc(st[1])}</span>${syncBadge}</div>
-    <div class="money">${esc(money(o.kg*o.rate))}</div></div>`;
+    <div class="money">${esc(money(offerAmount(o)))}</div></div>`;
 }
 
 /* ---------------- FARMER: sell ---------------- */
@@ -1557,7 +1571,7 @@ function assistantReply(rawText){
   }
 
   if(intent === "ledger"){
-    const due = S.offers.filter(o => o.status !== "paid").reduce((a,o) => a + o.kg*o.rate, 0);
+    const due = S.offers.filter(o => o.status !== "paid").reduce((a,o) => a + offerAmount(o), 0);
     if(due > 0){
       return {
         text: T(`तपाईंलाई ${money(due)} आउन बाँकी छ। भुक्तानी सामान्यतया तौलिएको ४८ घण्टाभित्र आउँछ।`,
@@ -2290,8 +2304,8 @@ async function doBookRental(rentalId){
 
 /* ---------------- FARMER: mine ---------------- */
 function viewMine(){
-  const paid = S.offers.filter(o=>o.status==="paid").reduce((a,o)=>a+o.kg*o.rate,0);
-  const due  = S.offers.filter(o=>o.status!=="paid").reduce((a,o)=>a+o.kg*o.rate,0);
+  const paid = S.offers.filter(o=>o.status==="paid").reduce((a,o)=>a+offerAmount(o),0);
+  const due  = S.offers.filter(o=>o.status!=="paid").reduce((a,o)=>a+offerAmount(o),0);
   return `
   <div class="stack">
     <div class="kpi">
