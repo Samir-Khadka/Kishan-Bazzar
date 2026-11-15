@@ -63,9 +63,11 @@ function fakeEl() {
   });
 }
 
-function makeContext({ storage = {}, fetchImpl, anchors = [] } = {}) {
+function makeContext({ storage = {}, storageImpl, fetchImpl, anchors = [], locationSearch = "" } = {}) {
   const data = { ...storage };
-  const localStorage = {
+  // storageImpl lets a test simulate a browser whose localStorage
+  // throws (cookies/storage blocked); otherwise a plain in-memory map.
+  const localStorage = storageImpl || {
     getItem: k => (k in data ? data[k] : null),
     setItem: (k, v) => { data[k] = String(v); },
     removeItem: k => { delete data[k]; }
@@ -86,6 +88,7 @@ function makeContext({ storage = {}, fetchImpl, anchors = [] } = {}) {
       documentElement: fakeEl()
     },
     window: { location: { href: "" }, addEventListener: () => {}, scrollTo: () => {} },
+    location: { search: locationSearch },
     navigator: {},
     fetch: fetchImpl || (async () => { throw new Error("no fetch stub"); }),
     URLSearchParams, encodeURIComponent, decodeURIComponent
@@ -572,6 +575,136 @@ const run = (ctx, code) => vm.runInContext(code, ctx.sandbox);
     check("the retry renders the lots",
           String(ctx.els["market-lots"].innerHTML || "").includes("गोलभेँडा"),
           String(ctx.els["market-lots"].innerHTML || ""));
+  }
+
+  console.log("\n=== site.js: blocked localStorage must not kill the website (2026-11-15) ===");
+  {
+    // Cookies/storage blocked (Firefox with cookies disabled, strict
+    // private mode): localStorage.getItem throws SecurityError. Before
+    // the fix the throw happened at site.js load (top-level LANG read),
+    // so every page lost its market lots, stats, language toggle and
+    // auth chrome — LANG sat in the temporal dead zone and toggleLang()
+    // threw ReferenceError. toggleLang() also threw AFTER flipping LANG
+    // when setItem threw (Safari private-mode quota), so the toggle
+    // looked dead with the new language recorded but never applied.
+    const throwingStorage = {
+      getItem() { throw new Error("SecurityError: access denied"); },
+      setItem() { throw new Error("SecurityError: access denied"); },
+      removeItem() {}
+    };
+    const lots = [{ id: "KAV-101", crop_code: "GOLB", pooled_kg: 120, status: "ready", rate_per_kg: 45 }];
+    const counts = { lots: 0 };
+    const fetchImpl = async (url) => {
+      if (String(url).includes("/v1/market/lots")) { counts.lots++; return { ok: true, status: 200, json: async () => lots }; }
+      throw new Error("unexpected fetch " + url);
+    };
+    let ctx = null, loadErr = null;
+    try { ctx = makeContext({ storageImpl: throwingStorage, fetchImpl }); }
+    catch (e) { loadErr = e; }
+    check("site.js loads when localStorage.getItem throws", ctx !== null, loadErr && loadErr.message);
+    if (ctx) {
+      check("language defaults to Nepali when storage is blocked",
+            run(ctx, "LANG") === "ne", String(run(ctx, "LANG")));
+      let threw = null;
+      try { run(ctx, "toggleLang()"); } catch (e) { threw = e; }
+      check("toggleLang() does not throw when storage is blocked", threw === null, threw && threw.message);
+      check("toggle flips and applies the language with storage blocked",
+            run(ctx, "LANG") === "en" && ctx.sandbox.document.documentElement.lang === "en",
+            `${run(ctx, "LANG")} / ${ctx.sandbox.document.documentElement.lang}`);
+      await sleep(30);
+      check("market lots still load with storage blocked (rendered in the toggled language)",
+            String(ctx.els["market-lots"].innerHTML || "").includes("Tomato"),
+            String(ctx.els["market-lots"].innerHTML || ""));
+      check("the toggle's market fetch still fired once",
+            counts.lots === 1, JSON.stringify(counts));
+    }
+    check("site.js reads/writes the stored language defensively (no bare top-level access)",
+          siteJs.includes("function readStoredLang") && siteJs.includes("function storeLang") &&
+          !/let LANG = localStorage\.getItem/.test(siteJs));
+  }
+  {
+    // Reads work, writes throw (Safari private-mode quota): the stored
+    // language is honoured, and a toggle must still flip + apply even
+    // though the preference cannot be persisted.
+    const readOnlyStorage = {
+      getItem: k => (k === "kb-lang" ? "en" : null),
+      setItem() { throw new Error("QuotaExceededError"); },
+      removeItem() {}
+    };
+    const ctx = makeContext({
+      storageImpl: readOnlyStorage,
+      fetchImpl: async () => { throw new Error("no fetch"); }
+    });
+    check("stored language is honoured when only writes are blocked",
+          run(ctx, "LANG") === "en", String(run(ctx, "LANG")));
+    let threw = null;
+    try { run(ctx, "toggleLang()"); } catch (e) { threw = e; }
+    check("toggle does not throw when setItem throws", threw === null, threw && threw.message);
+    check("toggle still flips and applies the language when the write fails",
+          run(ctx, "LANG") === "ne" && ctx.sandbox.document.documentElement.lang === "ne",
+          `${run(ctx, "LANG")} / ${ctx.sandbox.document.documentElement.lang}`);
+  }
+
+  console.log("\n=== lot.html: detail card renders when localStorage is blocked (2026-11-15) ===");
+  {
+    // langNe() read localStorage bare, so renderLotDetail() threw and
+    // the lot page never rendered its card even after the fetch
+    // succeeded. The fetch is held pending so the pre-fix throw can be
+    // caught synchronously (on unfixed code the IIFE would otherwise
+    // reject unhandled and crash the run).
+    const lotHtml = fs.readFileSync(path.join(WEBSITE, "lot.html"), "utf8");
+    const throwingStorage = {
+      getItem() { throw new Error("SecurityError: access denied"); },
+      setItem() { throw new Error("SecurityError: access denied"); },
+      removeItem() {}
+    };
+    const lot = { id: "KAV-101", crop_code: "GOLB", pooled_kg: 120, status: "ready", rate_per_kg: 45, grade: "A", coop_name: "Kavre Veg" };
+    let releaseFetch;
+    const fetchImpl = async () => {
+      await new Promise(res => { releaseFetch = res; });
+      return { status: 200, ok: true, json: async () => lot };
+    };
+    const ctx = makeContext({ storageImpl: throwingStorage, fetchImpl, locationSearch: "?id=KAV-101" });
+    for (const s of inlineScripts(lotHtml)) vm.runInContext(s, ctx.sandbox, { filename: "lot-inline.js" });
+    await sleep(10); // the IIFE is now held inside its fetch
+    let threw = null;
+    try { run(ctx, "renderLotDetail()"); } catch (e) { threw = e; }
+    check("renderLotDetail() does not throw when localStorage is blocked", threw === null, threw && threw.message);
+    check("lot detail shows Loading while the fetch is held",
+          String(ctx.els["lot-detail"].innerHTML || "").includes("लोड हुँदैछ"),
+          String(ctx.els["lot-detail"].innerHTML || ""));
+    if (!threw) {
+      releaseFetch();
+      await sleep(30);
+      const html = String(ctx.els["lot-detail"].innerHTML || "");
+      check("lot detail card renders the fetched lot with storage blocked",
+            html.includes("गोलभेँडा") && html.includes("KAV-101") && html.includes("Kavre Veg"),
+            html.slice(0, 200));
+    }
+    check("lot.html langNe() falls back to Nepali when storage is blocked",
+          /function langNe\(\)\{ try\{/.test(lotHtml) && lotHtml.includes("catch(_e){ return true; }"));
+  }
+
+  console.log("\n=== source: first-paint copy matches data-ne on every website page (2026-11-15) ===");
+  {
+    // Ten elements (about/contact/how) showed a SHORTER Nepali sentence
+    // on first paint than their data-ne attribute held, so toggling
+    // NE->EN->NE silently changed the Nepali copy (e.g. about.html's
+    // intro gained a whole second sentence). The body text must equal
+    // data-ne: the page defaults to Nepali, so first paint IS the
+    // data-ne text.
+    const files = fs.readdirSync(WEBSITE).filter(f => f.endsWith(".html"));
+    const drift = [];
+    for (const f of files) {
+      const src = fs.readFileSync(path.join(WEBSITE, f), "utf8");
+      const re = /<([a-z0-9]+)([^>]*)data-ne="([^"]*)"[^>]*>([^<]*)<\/\1>/gi;
+      let m;
+      while ((m = re.exec(src))) {
+        if (m[4].trim() && m[4].trim() !== m[3].trim()) drift.push(`${f}: ${JSON.stringify(m[4].trim())}`);
+      }
+    }
+    check("no element shows different Nepali copy on first paint than after a toggle",
+          drift.length === 0, drift.join(" | "));
   }
 
   console.log(`\n${passed} passed, ${failed} failed.`);

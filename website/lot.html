@@ -51,7 +51,10 @@ function escHtml(s){
     c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
-function langNe(){ return (localStorage.getItem("kb-lang")||"ne")==="ne"; }
+// Same blocked-storage guard as site.js: a bare getItem here threw
+// inside renderLotDetail, so a lot page with storage blocked never
+// rendered its detail card even after the fetch succeeded.
+function langNe(){ try{ return (localStorage.getItem("kb-lang")||"ne")==="ne"; }catch(_e){ return true; } }
 
 function statusLabel(s){
   const ne = langNe();

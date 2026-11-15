@@ -1,6 +1,18 @@
 /* Shared site JS: language toggle + live API data */
+// localStorage can be blocked (cookies disabled, strict private mode):
+// a bare getItem/setItem throws, and the language read below runs at
+// load — one throw here kills this whole script on every page (market
+// lots, stats, language toggle, auth chrome all dead). Read/write the
+// language defensively instead; without storage the site still works,
+// it just forgets the language between visits.
+function readStoredLang(){
+  try{ return localStorage.getItem("kb-lang") || "ne"; }catch(_e){ return "ne"; }
+}
+function storeLang(lang){
+  try{ localStorage.setItem("kb-lang", lang); }catch(_e){}
+}
 const API = "";  // same origin — API lives at /v1/* alongside /site/*
-let LANG = localStorage.getItem("kb-lang") || "ne";
+let LANG = readStoredLang();
 
 /* ---------------- website session (fully separate from the app) ----
    The website and the app are separate surfaces with separate
@@ -69,7 +81,10 @@ async function apiAuthed(path){
 
 function toggleLang(){
   LANG = LANG === "ne" ? "en" : "ne";
-  localStorage.setItem("kb-lang", LANG);
+  // A throwing setItem (Safari private-mode quota) used to abort the
+  // toggle after LANG had already flipped — the page stayed in the old
+  // language with the new one recorded, so the toggle looked dead.
+  storeLang(LANG);
   applyLang();
 }
 function applyLang(){
