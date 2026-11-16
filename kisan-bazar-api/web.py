@@ -66,6 +66,17 @@ def json_body():
     return parsed if isinstance(parsed, dict) else {}
 
 
+def str_field(value):
+    """A JSON string field, stripped — or None when the value is not
+    a string. Handlers must use this instead of `(body.get(...) or
+    "").strip()`: a JSON list/dict/number has no .strip(), so the old
+    spelling 500'd (AttributeError) on wrong-typed input, and a
+    non-string that reached a SQLite bind 500'd as InterfaceError.
+    A non-string is a client error, never a 500: callers turn None
+    into their own 400 (or treat it as absent for optional fields)."""
+    return value.strip() if isinstance(value, str) else None
+
+
 def require_auth(f):
     """Rejects the request with 401 unless a valid, unexpired bearer
     token is present. On success, g.phone holds the authenticated

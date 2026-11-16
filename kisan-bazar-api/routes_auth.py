@@ -10,7 +10,8 @@ import auth
 import db
 import messaging
 import repositories
-from web import DEMO_MODE, json_body, parse_number, require_auth, require_self
+from web import (DEMO_MODE, json_body, parse_number, require_auth,
+                 require_self, str_field)
 
 bp = Blueprint("auth", __name__)
 
@@ -185,13 +186,25 @@ def signup():
     """
     body = json_body()
     phone = (body.get("phone") or "").strip()
-    name = (body.get("name") or "").strip()
-    role = (body.get("role") or "farmer").strip().lower()
+    # str_field / isinstance checks, not (body.get(...) or "").strip():
+    # a JSON list/dict for name, role, coop_id or payout_method 500'd
+    # on .strip() (or later on the INSERT bind) — wrong type is a 400.
+    name = str_field(body.get("name")) or ""
+    raw_role = body.get("role")
+    if raw_role is not None and not isinstance(raw_role, str):
+        return jsonify({"error": "role must be a string"}), 400
+    role = (raw_role or "farmer").strip().lower()
     if role not in ("farmer", "buyer"):
         return jsonify({"error": "role must be 'farmer' or 'buyer'"}), 400
-    coop_id = body.get("coop_id") or "kavre-veg"
+    raw_coop = body.get("coop_id")
+    if raw_coop is not None and not isinstance(raw_coop, str):
+        return jsonify({"error": "coop_id must be a string"}), 400
+    coop_id = raw_coop or "kavre-veg"
     land_type = body.get("land_type") or "bari"
-    payout_method = body.get("payout_method") or "esewa"
+    raw_payout = body.get("payout_method")
+    if raw_payout is not None and not isinstance(raw_payout, str):
+        return jsonify({"error": "payout_method must be a string"}), 400
+    payout_method = raw_payout or "esewa"
     # is_staff is deliberately NOT read from the request body: honoring
     # {"role":"admin"} here was a full privilege-escalation hole.
     is_staff = 0

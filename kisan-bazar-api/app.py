@@ -48,6 +48,21 @@ import db
 
 app = Flask(__name__)
 
+# Behind Render (or any reverse proxy) request.remote_addr is the
+# PROXY's IP for every client, not the client's. Every per-IP rate
+# limit in this app (assistant 30/min, admin login 10/10 min,
+# request-code 60/10 min, orders/offers 10/10 min, crop-doctor 20/10
+# min) would then share ONE bucket: a single chatty user — or one
+# attacker — locks every other user out, and the limits stop
+# distinguishing clients at all. ProxyFix(x_for=1) restores the real
+# client IP from X-Forwarded-For, trusting only the LAST hop — the
+# one Render itself appends — so a client-supplied fake
+# X-Forwarded-For is ignored (Render appends the real IP after it).
+# Direct local runs (flask run, run.py, tests) send no
+# X-Forwarded-For, so remote_addr stays the socket peer there.
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+
 # Request bodies in this API are small JSON documents — the largest
 # legitimate field is a 2000-char symptom description. Cap them at
 # 1 MB: with no limit Flask parses arbitrarily large bodies into

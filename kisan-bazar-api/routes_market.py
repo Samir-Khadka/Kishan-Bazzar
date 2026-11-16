@@ -11,7 +11,7 @@ import db
 import repositories
 from web import (DEFAULT_TARGET_KG, MAX_REASONABLE_KG, idempotent,
                  is_valid_nepali_mobile, json_body, parse_number, reject,
-                 require_auth, require_self, require_staff,
+                 require_auth, require_self, require_staff, str_field,
                  valid_positive_kg, valid_positive_number)
 
 bp = Blueprint("market", __name__)
@@ -44,8 +44,14 @@ def create_listing():
     coop_id = farmer["coop_id"]
 
     # Validate crop_code against the crops table — an invalid code would
-    # otherwise die as an unhandled 500 on the FK constraint.
-    crop = repositories.get_crop(conn, body["crop_code"])
+    # otherwise die as an unhandled 500 on the FK constraint. A
+    # non-string code is a 400, not a 500: it reached the SELECT bind
+    # and died as InterfaceError.
+    crop_code = str_field(body.get("crop_code"))
+    if not crop_code:
+        conn.close()
+        return jsonify({"error": "unknown crop_code"}), 400
+    crop = repositories.get_crop(conn, crop_code)
     if not crop:
         conn.close()
         return jsonify({"error": "unknown crop_code"}), 400
@@ -53,7 +59,7 @@ def create_listing():
     cur = conn.execute(
         "INSERT INTO listings (farmer_phone, coop_id, crop_code, grade, quantity_kg) "
         "VALUES (?,?,?,?,?)",
-        (body["farmer_phone"], coop_id, body["crop_code"], body["grade"], body["quantity_kg"]),
+        (body["farmer_phone"], coop_id, crop_code, body["grade"], body["quantity_kg"]),
     )
     listing_id = cur.lastrowid
     conn.commit()
@@ -194,6 +200,11 @@ def place_order():
         return jsonify({"error": "buyer_phone must be a valid Nepali mobile number"}), 400
     if phone != g.phone:
         return jsonify({"error": "you can only do this for your own phone number"}), 403
+    # A non-string lot_id reached the availability SELECT bind and
+    # 500'd (InterfaceError) — wrong type is a 400, never a 500.
+    lot_id = body.get("lot_id")
+    if not isinstance(lot_id, str) or not lot_id.strip():
+        return jsonify({"error": "lot_id must be a string"}), 400
     # Free-text display name: bound it — an authenticated caller could
     # otherwise bloat the orders table with unbounded strings.
     buyer_name = str(body["buyer_name"]).strip()
@@ -206,7 +217,7 @@ def place_order():
     try:
         order_id, lot = availability.place_order_locked(
             conn,
-            lot_id=body["lot_id"],
+            lot_id=lot_id,
             quantity_kg=body["quantity_kg"],
             buyer_name=buyer_name,
             buyer_phone=phone,
@@ -252,7 +263,9 @@ def settle_order(order_id):
     staff settling the same order concurrently can't double-record.
     """
     body = json_body()
-    method = (body.get("method") or "").strip().lower()
+    # str_field, not (body.get(...) or "").strip(): a JSON list/dict
+    # for method/reference 500'd on .strip() — wrong type is a 400.
+    method = (str_field(body.get("method")) or "").lower()
     if method not in repositories.SETTLEMENT_METHODS:
         return jsonify({
             "error": f"method must be one of {list(repositories.SETTLEMENT_METHODS)}"
@@ -263,7 +276,10 @@ def settle_order(order_id):
         return jsonify({"error": "amount must be a number"}), 400
     if not valid_positive_number(amount):
         return jsonify({"error": "amount must be positive"}), 400
-    reference = (body.get("reference") or "").strip() or None
+    raw_reference = body.get("reference")
+    if raw_reference is not None and not isinstance(raw_reference, str):
+        return jsonify({"error": "reference must be a string"}), 400
+    reference = (raw_reference or "").strip() or None
     # Staff note: bound it — this is free text on an authenticated
     # write path.
     if reference and len(reference) > 500:
@@ -330,8 +346,13 @@ def make_offer():
     if len(buyer_name) > 120:
         return jsonify({"error": "buyer_name too long"}), 400
 
+    # A non-string lot_id reached the SELECT bind and 500'd
+    # (InterfaceError) — wrong type is a 400, never a 500.
+    lot_id = body.get("lot_id")
+    if not isinstance(lot_id, str) or not lot_id.strip():
+        return jsonify({"error": "lot_id must be a string"}), 400
     conn = db.get_db()
-    lot = repositories.get_lot(conn, body["lot_id"])
+    lot = repositories.get_lot(conn, lot_id)
     if not lot:
         conn.close()
         return jsonify({"error": "lot not found"}), 404
@@ -342,7 +363,7 @@ def make_offer():
     cur = conn.execute(
         "INSERT INTO offers (lot_id, buyer_phone, buyer_name, bid_rate_per_kg, quantity_kg) "
         "VALUES (?,?,?,?,?)",
-        (body["lot_id"], phone, buyer_name, rate, qty))
+        (lot_id, phone, buyer_name, rate, qty))
     conn.commit()
     offer_id = cur.lastrowid
     conn.close()
@@ -378,7 +399,9 @@ def decide_offer(offer_id):
     Body: {"decision": "accepted"|"rejected"|"countered", "counter_rate_per_kg": N}
     Accepted offers convert to real orders."""
     body = json_body()
-    decision = (body.get("decision") or "").strip().lower()
+    # str_field, not (body.get(...) or "").strip(): a JSON list/dict
+    # for decision 500'd on .strip() — wrong type is a 400 below.
+    decision = (str_field(body.get("decision")) or "").lower()
     if decision not in ("accepted", "rejected", "countered"):
         return jsonify({"error": "decision must be accepted, rejected, or countered"}), 400
     counter = None

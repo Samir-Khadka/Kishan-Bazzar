@@ -7,7 +7,7 @@ from flask import Blueprint, g, jsonify, request
 import auth
 import db
 import repositories
-from web import json_body, require_auth, require_self
+from web import json_body, require_auth, require_self, str_field
 
 bp = Blueprint("farmer", __name__)
 
@@ -33,9 +33,13 @@ def save_land_scan(phone):
         return jsonify({"error": f"confidence must be one of {sorted(VALID_CONFIDENCE)}"}), 400
     # The derived signals are free-form client strings — bound them so
     # an authenticated caller can't bloat the table with unbounded text.
+    # Non-strings are a 400: a JSON list/dict here reached the INSERT
+    # bind and 500'd (InterfaceError) instead.
     for field in ("color_key", "texture", "drainage"):
         val = body.get(field)
-        if val is not None and len(str(val)) > 64:
+        if val is not None and not isinstance(val, str):
+            return jsonify({"error": f"{field} must be a string"}), 400
+        if val is not None and len(val) > 64:
             return jsonify({"error": f"{field} too long"}), 400
 
     conn = db.get_db()
@@ -120,12 +124,18 @@ def crop_doctor_diagnose():
     if not auth.check_rate_limit(f"diagnose:{request.remote_addr}", max_attempts=20, window_seconds=600):
         return jsonify({"error": "too many requests, slow down"}), 429
     body = json_body()
-    crop_code = (body.get("crop_code") or "").strip().upper()
-    symptoms = (body.get("symptoms") or "").strip()
+    # str_field, not (body.get(...) or "").strip(): a JSON list/dict
+    # for any of these fields 500'd on .strip() — wrong type is a 400
+    # via the required-field check below, never a 500.
+    crop_code = (str_field(body.get("crop_code")) or "").upper()
+    symptoms = str_field(body.get("symptoms")) or ""
     # Free-text fields are stored verbatim — bound them against DB bloat.
     if len(symptoms) > 2000:
         return jsonify({"error": "symptoms too long"}), 400
-    photo_ref_in = (body.get("photo_ref") or "").strip()
+    raw_photo = body.get("photo_ref")
+    if raw_photo is not None and not isinstance(raw_photo, str):
+        return jsonify({"error": "photo_ref must be a string"}), 400
+    photo_ref_in = (raw_photo or "").strip()
     if len(photo_ref_in) > 256:
         return jsonify({"error": "photo_ref too long"}), 400
     # The diagnosis is written to the AUTHENTICATED farmer's history.

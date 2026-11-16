@@ -7,7 +7,8 @@ import assistant
 import auth
 import db
 import repositories
-from web import json_body, parse_number, reject, require_auth, valid_positive_number
+from web import (json_body, parse_number, reject, require_auth,
+                 str_field, valid_positive_number)
 
 bp = Blueprint("services", __name__)
 
@@ -31,10 +32,13 @@ def list_rentals():
 def create_rental():
     """Owner lists a machine for rent. Auth required."""
     body = json_body()
-    mtype = (body.get("machine_type") or "").strip()
-    name = (body.get("machine_name") or "").strip()
-    location = (body.get("location") or "").strip()
-    contact = (body.get("contact_phone") or "").strip()
+    # str_field, not (body.get(...) or "").strip(): a JSON list/dict
+    # for any of these free-text fields 500'd on .strip() — a
+    # wrong-typed value is a 400 via the checks below, never a 500.
+    mtype = str_field(body.get("machine_type"))
+    name = str_field(body.get("machine_name"))
+    location = str_field(body.get("location"))
+    contact = str_field(body.get("contact_phone"))
     try:
         # parse_number, not float(): JSON true would otherwise cast
         # to 1.0 and slip past the bool rejection in
@@ -82,7 +86,9 @@ def book_rental(rental_id):
         days = int(raw_days)
     except (TypeError, ValueError):
         return jsonify({"error": "days must be an integer"}), 400
-    book_date = (body.get("book_date") or "").strip()
+    # str_field, not (body.get(...) or "").strip(): a JSON list/dict
+    # for book_date 500'd on .strip() — wrong type is a 400 below.
+    book_date = str_field(body.get("book_date"))
     if days < 1 or days > 30 or not book_date:
         return jsonify({"error": "days 1-30 and book_date required"}), 400
     from datetime import datetime
