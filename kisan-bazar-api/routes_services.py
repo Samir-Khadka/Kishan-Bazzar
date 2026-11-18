@@ -7,7 +7,7 @@ import assistant
 import auth
 import db
 import repositories
-from web import (json_body, parse_number, reject, require_auth,
+from web import (cache_public, json_body, parse_number, reject, require_auth,
                  str_field, valid_positive_number)
 
 bp = Blueprint("services", __name__)
@@ -24,7 +24,8 @@ def list_rentals():
     conn = db.get_db()
     rows = repositories.list_rentals(conn, mtype, loc)
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    # Public, unauthenticated list — cacheable for 60s (see web.cache_public).
+    return cache_public(jsonify([dict(r) for r in rows]))
 
 
 @bp.post("/v1/rentals")

@@ -77,6 +77,20 @@ def str_field(value):
     return value.strip() if isinstance(value, str) else None
 
 
+def cache_public(resp, seconds=60):
+    """Mark a response cacheable for `seconds` by browsers and shared
+    caches. For PUBLIC, unauthenticated GETs only — the payload must
+    carry no PII and no per-user data, and a minute of staleness must
+    be harmless (market listings, prices, rentals: all change only
+    when staff confirm lots or owners list machines). The app's
+    after_request hook stamps `no-store` on anything without an
+    explicit Cache-Control, so a handler that wants caching must set
+    it — this helper is the one place that spelling lives. Never use
+    on an authenticated or user-scoped response."""
+    resp.headers["Cache-Control"] = f"public, max-age={seconds}"
+    return resp
+
+
 def require_auth(f):
     """Rejects the request with 401 unless a valid, unexpired bearer
     token is present. On success, g.phone holds the authenticated

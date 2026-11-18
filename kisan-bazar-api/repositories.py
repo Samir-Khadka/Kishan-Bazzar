@@ -175,26 +175,33 @@ def farmer_dues(conn, phone):
     joined lot_listings last, which EXPLAIN showed as a full SCAN of
     lot_listings on every ledger/dues read; the row set is identical
     (same (order, lot_listing) pairs for this farmer, same proration).
+
+    The proration itself is aggregated in SQL (SUM ... GROUP BY the
+    settlement state), so the call returns two numbers instead of
+    pulling every (order, lot_listing) pair into Python: a farmer with
+    years of orders used to make every ledger chat transfer their
+    whole order history, growing linearly with lifetime volume. The
+    per-row math is the same share formula (qty * rate * contrib /
+    pooled); a zero-pooled lot contributes NULL, which SUM skips —
+    the same skip the old Python loop did. Values match the old shape
+    to float rounding (the ledger displays whole rupees).
     """
     rows = conn.execute(
-        "SELECT o.quantity_kg AS qty, o.unit_rate AS rate, "
-        "ll.kg_contributed AS contrib, lot.pooled_kg AS pooled, "
-        "(s.id IS NOT NULL) AS is_settled "
+        "SELECT (s.id IS NOT NULL) AS is_settled, "
+        "COALESCE(SUM(o.quantity_kg * o.unit_rate * ll.kg_contributed "
+        "/ NULLIF(lot.pooled_kg, 0)), 0) AS share "
         "FROM listings li "
         "JOIN lot_listings ll ON ll.listing_id = li.id "
         "JOIN lots lot ON lot.id = ll.lot_id "
         "JOIN orders o ON o.lot_id = lot.id "
         "LEFT JOIN order_settlements s ON s.order_id = o.id "
-        "WHERE li.farmer_phone=?",
+        "WHERE li.farmer_phone=? "
+        "GROUP BY is_settled",
         (phone,),
     ).fetchall()
     dues = {"pending": 0.0, "settled": 0.0}
     for r in rows:
-        pooled = r["pooled"] or 0
-        if pooled <= 0:
-            continue
-        share = r["qty"] * r["rate"] * (r["contrib"] / pooled)
-        dues["settled" if r["is_settled"] else "pending"] += share
+        dues["settled" if r["is_settled"] else "pending"] = float(r["share"])
     return dues
 
 

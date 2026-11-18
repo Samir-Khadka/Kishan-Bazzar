@@ -17,7 +17,10 @@ response header) before it was made:
   4. Static files (/site/*, /app) were served with Cache-Control:
      no-cache (Flask's send_file default), so every navigation
      revalidated every asset. They now carry public, max-age=3600,
-     while API JSON keeps no-store.
+     while authenticated API JSON keeps no-store. (2026-11-18: the
+     public, unauthenticated read endpoints — prices/latest,
+     prices/trends, market/lots, lots, rentals — now carry public,
+     max-age=60 like /v1/stats; see test_performance_nov18.)
 
 Run: python3 tests/test_performance_nov10.py
 """
@@ -146,12 +149,20 @@ def run():
         assert r.status_code == 200, (path, r.status_code)
         assert r.headers.get("Cache-Control") == "public, max-age=3600", (
             path, r.headers.get("Cache-Control"))
-    for path in ("/v1/health", "/v1/prices/latest"):
-        r = client.get(path)
-        assert r.status_code == 200, (path, r.status_code)
-        assert r.headers.get("Cache-Control") == "no-store", (
-            path, r.headers.get("Cache-Control"))
-    print("  PASS — /site/* + /app: public, max-age=3600; API: no-store")
+    # /v1/health keeps no-store; /v1/prices/latest moved to the 60s
+    # public cache on 2026-11-18 with the other public read endpoints
+    # (test_performance_nov18 pins the full list) — it is public,
+    # unauthenticated data that only changes when staff confirm lots.
+    r = client.get("/v1/health")
+    assert r.status_code == 200, r.get_json()
+    assert r.headers.get("Cache-Control") == "no-store", (
+        "/v1/health", r.headers.get("Cache-Control"))
+    r = client.get("/v1/prices/latest")
+    assert r.status_code == 200, r.get_json()
+    assert r.headers.get("Cache-Control") == "public, max-age=60", (
+        "/v1/prices/latest", r.headers.get("Cache-Control"))
+    print("  PASS — /site/* + /app: public, max-age=3600; /v1/health: no-store; "
+          "/v1/prices/latest: public, max-age=60")
     passed += 1
 
     print("\n=== 7. new indexes exist, redundant single-column ones are gone ===")

@@ -9,7 +9,7 @@ import auth
 import availability
 import db
 import repositories
-from web import (DEFAULT_TARGET_KG, MAX_REASONABLE_KG, idempotent,
+from web import (DEFAULT_TARGET_KG, MAX_REASONABLE_KG, cache_public, idempotent,
                  is_valid_nepali_mobile, json_body, parse_number, reject,
                  require_auth, require_self, require_staff, str_field,
                  valid_positive_kg, valid_positive_number)
@@ -110,10 +110,13 @@ def list_lots():
     # repositories.lots_page.
     rows, total = repositories.lots_page(conn, coop_id, status, limit, offset)
     conn.close()
-    return jsonify({
+    # Public, unauthenticated read — cacheable for 60s (see web.cache_public):
+    # the website and the app hit this on every load, and lots only change
+    # when staff confirm them.
+    return cache_public(jsonify({
         "data": [dict(r) for r in rows],
         "total": total, "limit": limit, "offset": offset,
-    })
+    }))
 
 
 @bp.get("/v1/lots/<lot_id>")
@@ -126,7 +129,7 @@ def get_lot(lot_id):
     conn.close()
     if not row:
         return jsonify({"error": "lot not found"}), 404
-    return jsonify(dict(row))
+    return cache_public(jsonify(dict(row)))
 
 
 @bp.post("/v1/lots/<lot_id>/confirm")
@@ -171,7 +174,7 @@ def market_lots():
     # website visit pulled the entire ready-lots table.
     rows = repositories.market_ready_lots(conn)
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return cache_public(jsonify([dict(r) for r in rows]))
 
 
 @bp.post("/v1/orders")
@@ -488,7 +491,7 @@ def price_trends():
     conn = db.get_db()
     by_crop = repositories.price_trends(conn, crop_code, days)
     conn.close()
-    return jsonify(by_crop)
+    return cache_public(jsonify(by_crop))
 
 
 @bp.get("/v1/prices/latest")
@@ -497,7 +500,7 @@ def latest_prices():
     conn = db.get_db()
     latest = repositories.latest_prices(conn)
     conn.close()
-    return jsonify(latest)
+    return cache_public(jsonify(latest))
 
 
 @bp.get("/v1/stats")

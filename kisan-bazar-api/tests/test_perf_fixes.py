@@ -66,9 +66,15 @@ def run():
     print("\n=== 2. /v1/prices/trends groups per crop/day in SQL, same output ===")
     conn = db.get_db()
     # Two KAULI lots same day (avg 55.0, 2 lots), on a day with no other
-    # KAULI activity so the expectation is unambiguous
-    add_lot(conn, "L-T1", "KAULI", 50.0, "2026-10-18 09:00:00")
-    add_lot(conn, "L-T2", "KAULI", 60.0, "2026-10-18 11:00:00")
+    # KAULI activity so the expectation is unambiguous. The day is
+    # RELATIVE to today: the endpoint only returns the last 30 days, so
+    # the hardcoded 2026-10-18 this used to use silently fell out of
+    # the window on 2026-11-17 and the check failed with KeyError —
+    # a date bomb, not a code regression.
+    from datetime import date, timedelta
+    day = (date.today() - timedelta(days=5)).isoformat()
+    add_lot(conn, "L-T1", "KAULI", 50.0, f"{day} 09:00:00")
+    add_lot(conn, "L-T2", "KAULI", 60.0, f"{day} 11:00:00")
     conn.commit()
     conn.close()
     r = client.get("/v1/prices/trends?days=30&crop_code=KAULI")
@@ -76,8 +82,8 @@ def run():
     trends = r.get_json()
     assert set(trends.keys()) == {"KAULI"}, trends.keys()
     day_rows = {row["date"]: row for row in trends["KAULI"]}
-    assert day_rows["2026-10-18"]["avg_rate"] == 55.0, day_rows
-    assert day_rows["2026-10-18"]["lots"] == 2, day_rows
+    assert day_rows[day]["avg_rate"] == 55.0, day_rows
+    assert day_rows[day]["lots"] == 2, day_rows
     # days sorted ascending within a crop, like before
     dates = [row["date"] for row in trends["KAULI"]]
     assert dates == sorted(dates), dates
