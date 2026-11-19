@@ -31,6 +31,7 @@ import sys
 import threading
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 
 import repositories
 
@@ -386,7 +387,7 @@ def chat(session_id, message, db_conn=None, farmer=None):
             intent = ctx.get("last_intent") or intent
 
     handler = _HANDLERS.get(intent, _fallback)
-    result = handler(text, lang, crops, ctx, db_conn, farmer, conf)
+    result = handler(Msg(text, lang, crops, ctx, db_conn, farmer, conf))
 
     ctx["last_intent"] = intent
     if crops:
@@ -414,54 +415,72 @@ def _default_chips(lang):
 # ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
+# Every intent handler takes ONE argument — a Msg carrying the whole
+# request — instead of the old 7 positional arguments
+# (text, lang, crops, ctx, db, farmer, conf), of which most handlers
+# used one or two and ignored the rest. Seven positionals meant a
+# caller could silently pass db and farmer in the wrong order and no
+# handler would notice until runtime; adding an eighth input (say, the
+# request's co-op) would have meant editing all twelve signatures.
+# Handlers now read only the fields they need, by name.
+@dataclass
+class Msg:
+    text: str        # raw user message
+    lang: str        # "ne" | "ro" | "en" — reply in the same language
+    crops: list      # crop codes extracted from the message
+    ctx: dict        # per-session conversation context
+    db: object       # sqlite connection (None when the route has none)
+    farmer: dict     # authenticated farmer row, or None when anonymous
+    conf: float      # intent-classification confidence 0..1
 
-def _greeting(_t, lang, _c, _ctx, _db, farmer, _conf):
-    name = f", {farmer['name'].split()[0]}" if farmer and farmer.get("name") else ""
+
+def _greeting(msg):
+    name = f", {msg.farmer['name'].split()[0]}" if msg.farmer and msg.farmer.get("name") else ""
     return _resp(
         T(f"नमस्ते{name}! 🙏 म किसान सहायक हुँ — भाउ, मौसम, बेच्ने तरिका, के लगाउने, वा तपाईंको हिसाबबारे सोध्नुहोस्।",
           f"Namaste{name}! 🙏 Ma kisan sahayak hun — bhau, mausam, bechne tarika, ke lagaune, wa tapaaiko hisab baare sodhnuhos.",
-          f"Hello{name}! 🙏 I'm your farm assistant — ask me about prices, weather, how to sell, what to plant, or your ledger.", lang),
-        chips=_default_chips(lang))
+          f"Hello{name}! 🙏 I'm your farm assistant — ask me about prices, weather, how to sell, what to plant, or your ledger.", msg.lang),
+        chips=_default_chips(msg.lang))
 
 
-def _price(_t, lang, crops, _ctx, db_conn, _farmer, conf):
-    if not crops:
+def _price(msg):
+    if not msg.crops:
         return _resp(
             T("कुन बालीको भाउ चाहियो? जस्तै: आलुको भाउ?",
               "Kun baliko bhau chahiyo? Jastai: aaluko bhau?",
-              "Which crop's price? For example: potato price?", lang),
-            chips=[T("आलु", "Aalu", "Potato", lang), T("धान", "Dhan", "Paddy", lang),
-                   T("गोलभेँडा", "Golbheda", "Tomato", lang)])
+              "Which crop's price? For example: potato price?", msg.lang),
+            chips=[T("आलु", "Aalu", "Potato", msg.lang), T("धान", "Dhan", "Paddy", msg.lang),
+                   T("गोलभेँडा", "Golbheda", "Tomato", msg.lang)])
     cards = []
     lines = []
-    for code in crops[:3]:
+    for code in msg.crops[:3]:
         ne, en, _al, ic = CROPS[code]
-        rate, chg = _get_price(db_conn, code)
-        name = T(ne, en, en, lang)
+        rate, chg = _get_price(msg.db, code)
+        name = T(ne, en, en, msg.lang)
         if rate is None:
             lines.append(T(f"{ic} {name}: अहिले भाउ उपलब्ध छैन।",
                            f"{ic} {name}: ahile bhau upalabdha chhaina.",
-                           f"{ic} {name}: no price available right now.", lang))
+                           f"{ic} {name}: no price available right now.", msg.lang))
             continue
         if chg is None:
             # No earlier recorded rate — state the price, claim no trend.
             lines.append(T(f"{ic} {name}: रू {rate}/के.जी.",
                            f"{ic} {name}: Rs {rate}/kg.",
-                           f"{ic} {name}: Rs {rate}/kg.", lang))
+                           f"{ic} {name}: Rs {rate}/kg.", msg.lang))
         else:
             arrow = "📈" if chg > 0 else "📉" if chg < 0 else "➡️"
-            dirn = T("बढेको", "badheko", "up", lang) if chg > 0 else \
-                   T("घटेको", "ghateko", "down", lang) if chg < 0 else \
-                   T("स्थिर", "sthir", "steady", lang)
+            dirn = T("बढेको", "badheko", "up", msg.lang) if chg > 0 else \
+                   T("घटेको", "ghateko", "down", msg.lang) if chg < 0 else \
+                   T("स्थिर", "sthir", "steady", msg.lang)
             lines.append(T(f"{ic} {name}: रू {rate}/के.जी. ({dirn} {arrow})",
                            f"{ic} {name}: Rs {rate}/kg ({dirn} {arrow})",
-                           f"{ic} {name}: Rs {rate}/kg ({dirn} {arrow})", lang))
+                           f"{ic} {name}: Rs {rate}/kg ({dirn} {arrow})", msg.lang))
         cards.append({"type": "price", "crop": code, "name": name,
                       "rate": rate, "change": chg, "icon": ic})
-    others = [c for c in CROPS if c not in crops][:2]
-    chips = [T(f"{CROPS[c][0]}को पनि", f"{CROPS[c][1]} pani", f"{CROPS[c][1]} too", lang)
+    others = [c for c in CROPS if c not in msg.crops][:2]
+    chips = [T(f"{CROPS[c][0]}को पनि", f"{CROPS[c][1]} pani", f"{CROPS[c][1]} too", msg.lang)
              for c in others]
-    chips.append(T("यो बेच्न चाहन्छु", "Yo bechna chahanchhu", "I want to sell this", lang))
+    chips.append(T("यो बेच्न चाहन्छु", "Yo bechna chahanchhu", "I want to sell this", msg.lang))
     return _resp("\n".join(lines), chips=chips, cards=cards)
 
 
@@ -504,7 +523,7 @@ def _get_price(db_conn, crop_code):
     return rate, (rate - rates[1]) / rates[1] * 100.0
 
 
-def _weather(_t, lang, _c, _ctx, _db, _farmer, _conf):
+def _weather(msg):
     # Static SAMPLE forecast until a real feed (DHM/Open-Meteo) is
     # wired in — and the reply says so, the same way the app's weather
     # card badges its demo data. A farmer planning around invented
@@ -512,46 +531,46 @@ def _weather(_t, lang, _c, _ctx, _db, _farmer, _conf):
     return _resp(
         T("🌤️ आज: घाम लाग्नेछ, २६° — तीन दिनपछि पानी पर्ने सम्भावना। मकै र अदुवा सुकाउने राम्रो मौका।\nℹ️ यो नमुना पूर्वानुमान हो — वास्तविक मौसम चाँडै जोडिनेछ।",
           "🌤️ Aaja: gham lagnechha, 26° — teen din pachhi pani parne sambhawana. Makai ra aduwa sukaune ramro mauka.\nℹ️ Yo namuna purbanuman ho — bastabik mausam chandai jodinechha.",
-          "🌤️ Today: sunny, 26° — rain likely in three days. Good window to dry maize and ginger.\nℹ️ This is sample forecast data — a live weather feed is coming soon.", lang),
-        chips=[T("भोलिको मौसम?", "Bholiko mausam?", "Tomorrow's weather?", lang),
-               T("आजको भाउ", "Aajako bhau", "Today's rates", lang)],
+          "🌤️ Today: sunny, 26° — rain likely in three days. Good window to dry maize and ginger.\nℹ️ This is sample forecast data — a live weather feed is coming soon.", msg.lang),
+        chips=[T("भोलिको मौसम?", "Bholiko mausam?", "Tomorrow's weather?", msg.lang),
+               T("आजको भाउ", "Aajako bhau", "Today's rates", msg.lang)],
         cards=[{"type": "weather", "today": "26° ☀️",
                 "advice": T("मकै/अदुवा सुकाउनुहोस्", "Makai/aduwa sukaunuhos",
-                            "Dry maize/ginger", lang)}])
+                            "Dry maize/ginger", msg.lang)}])
 
 
-def _sell(_t, lang, _c, _ctx, _db, _farmer, _conf):
+def _sell(msg):
     return _resp(
         T("बेच्न सजिलो छ:\n1️⃣ बेच्ने ट्याबमा बाली, तौल र श्रेणी छान्नुहोस्\n2️⃣ 'सहकारीमा पठाउनुहोस्' थिच्नुहोस्\n3️⃣ सहकारीले लट बनाएपछि SMS आउँछ\n4️⃣ तौलिएको ४८ घण्टाभित्र पैसा — eSewa, खल्ती वा नगद।",
           "Bechna sajilo chha:\n1️⃣ Bechne tab ma bali, taul ra shreni chhannuhos\n2️⃣ 'Sahakarima pathaunuhos' thichnuhos\n3️⃣ Sahakarile lot banaepachhi SMS aauchha\n4️⃣ Taulieko 48 ghanta bhitra paisa — eSewa, Khalti wa nagad.",
-          "Selling is simple:\n1️⃣ In the Sell tab pick crop, weight and grade\n2️⃣ Tap 'Send to my co-op'\n3️⃣ You'll get an SMS once the co-op forms a lot\n4️⃣ Paid within 48h of weighing — eSewa, Khalti or cash.", lang),
-        chips=[T("बेच्ने ट्याब खोल्ने", "Bechne tab kholne", "Open Sell tab", lang),
-               T("धन्यवाद", "Dhanyabad", "Thanks", lang)])
+          "Selling is simple:\n1️⃣ In the Sell tab pick crop, weight and grade\n2️⃣ Tap 'Send to my co-op'\n3️⃣ You'll get an SMS once the co-op forms a lot\n4️⃣ Paid within 48h of weighing — eSewa, Khalti or cash.", msg.lang),
+        chips=[T("बेच्ने ट्याब खोल्ने", "Bechne tab kholne", "Open Sell tab", msg.lang),
+               T("धन्यवाद", "Dhanyabad", "Thanks", msg.lang)])
 
 
-def _plant(_t, lang, crops, _ctx, _db, _farmer, _conf):
-    if crops:
-        ne, en, _al, ic = CROPS[crops[0]]
-        name = T(ne, en, en, lang)
+def _plant(msg):
+    if msg.crops:
+        ne, en, _al, ic = CROPS[msg.crops[0]]
+        name = T(ne, en, en, msg.lang)
         return _resp(
             T(f"{ic} {name} बारे सल्लाह ट्याबमा विस्तृत जानकारी छ — माटो, पानी र मलको मात्रा।",
               f"{ic} {name} baare sallah tab ma bistrit jankari chha — mato, pani ra malko matra.",
-              f"{ic} See the Advice tab for detailed {name} guidance — soil, water and fertilizer.", lang),
-            chips=_default_chips(lang))
+              f"{ic} See the Advice tab for detailed {name} guidance — soil, water and fertilizer.", msg.lang),
+            chips=_default_chips(msg.lang))
     return _resp(
         T("तपाईंको क्षेत्र र जग्गाअनुसार सल्लाह ट्याबमा अहिले लगाउन मिल्ने बालीहरू छन्। सामान्य नियम: असोजमा तोरी/मुसुरो, जेठमा धान।",
           "Tapaaiko kshetra ra jagga anusar sallah tab ma ahile lagauna milne baliharu chhan. Samanya niyam: Asoj ma tori/musuro, Jestha ma dhan.",
-          "The Advice tab lists what suits your zone and land right now. Rule of thumb: mustard/lentil in Asoj, paddy in Jestha.", lang),
-        chips=[T("सल्लाह हेर्ने", "Sallah herne", "See advice", lang)])
+          "The Advice tab lists what suits your zone and land right now. Rule of thumb: mustard/lentil in Asoj, paddy in Jestha.", msg.lang),
+        chips=[T("सल्लाह हेर्ने", "Sallah herne", "See advice", msg.lang)])
 
 
-def _ledger(_t, lang, _c, _ctx, db_conn, farmer, _conf):
-    if not farmer:
+def _ledger(msg):
+    if not msg.farmer:
         return _resp(
             T("हिसाब हेर्न लगइन गर्नुहोस् — मेरो ट्याबमा फोन नम्बरबाट कोड लिनुहोस्।",
               "Hisab herna login garnuhos — mero tab ma phone number bata code linuhos.",
-              "Log in to see your ledger — get a code with your phone number in the Mine tab.", lang),
-            chips=[T("लगइन गर्ने", "Login garne", "Log in", lang)])
+              "Log in to see your ledger — get a code with your phone number in the Mine tab.", msg.lang),
+            chips=[T("लगइन गर्ने", "Login garne", "Log in", msg.lang)])
     # The figures come from repositories.farmer_dues — the prorated
     # listings -> lot_listings -> lots -> orders join, split by the
     # order_settlements state: 'pending' is ordered-but-unpaid value,
@@ -562,74 +581,74 @@ def _ledger(_t, lang, _c, _ctx, db_conn, farmer, _conf):
     # degrades HONESTLY: the farmer is told the ledger couldn't be
     # fetched, never that nothing is owed.
     try:
-        if db_conn is None:
+        if msg.db is None:
             raise RuntimeError("no db connection")
-        dues = repositories.farmer_dues(db_conn, farmer["phone"])
+        dues = repositories.farmer_dues(msg.db, msg.farmer["phone"])
     except Exception as e:
         print(f"assistant ledger lookup failed: {e!r}", file=sys.stderr)
         return _resp(
             T("⚠️ अहिले तपाईंको हिसाब ल्याउन सकिएन। केही बेरपछि फेरि प्रयास गर्नुहोस्, वा सहकारीलाई फोन गर्नुहोस्।",
               "⚠️ Ahile tapaaiko hisab lyauna sakiena. Kehi berpachhi feri prayas garnuhos, wa sahakarilai phone garnuhos.",
-              "⚠️ I couldn't fetch your ledger right now. Please try again in a little while, or call your co-op.", lang),
-            chips=[T("फेरि प्रयास गर्ने", "Feri prayas garne", "Try again", lang)])
+              "⚠️ I couldn't fetch your ledger right now. Please try again in a little while, or call your co-op.", msg.lang),
+            chips=[T("फेरि प्रयास गर्ने", "Feri prayas garne", "Try again", msg.lang)])
     due, settled = dues["pending"], dues["settled"]
     if due > 0 and settled > 0:
         return _resp(
             T(f"💰 तपाईंलाई रू {due:,.0f} आउन बाँकी छ। ✅ रू {settled:,.0f} भुक्तानी भइसकेको छ।",
               f"💰 Tapailai Rs {due:,.0f} auna baaki chha. ✅ Rs {settled:,.0f} bhuktani bhaisakeko chha.",
-              f"💰 You have Rs {due:,.0f} pending. ✅ Rs {settled:,.0f} has already been settled.", lang),
-            chips=[T("धन्यवाद", "Dhanyabad", "Thanks", lang)])
+              f"💰 You have Rs {due:,.0f} pending. ✅ Rs {settled:,.0f} has already been settled.", msg.lang),
+            chips=[T("धन्यवाद", "Dhanyabad", "Thanks", msg.lang)])
     if due > 0:
         return _resp(
             T(f"💰 तपाईंलाई रू {due:,.0f} आउन बाँकी छ। तौलिएको ४८ घण्टाभित्र भुक्तानी हुन्छ।",
               f"💰 Tapailai Rs {due:,.0f} auna baaki chha. Taulieko 48 ghanta bhitra bhuktani hunchha.",
-              f"💰 You have Rs {due:,.0f} pending. Paid within 48 hours of weighing.", lang),
-            chips=[T("धन्यवाद", "Dhanyabad", "Thanks", lang)])
+              f"💰 You have Rs {due:,.0f} pending. Paid within 48 hours of weighing.", msg.lang),
+            chips=[T("धन्यवाद", "Dhanyabad", "Thanks", msg.lang)])
     if settled > 0:
         return _resp(
             T(f"✅ तपाईंको सबै हिसाब चुक्ता छ — रू {settled:,.0f} भुक्तानी भइसकेको छ, केही बाँकी छैन।",
               f"✅ Tapaaiko sabai hisab chukta chha — Rs {settled:,.0f} bhuktani bhaisakeko chha, kehi baaki chhaina.",
-              f"✅ You're all settled up — Rs {settled:,.0f} has been paid, nothing is pending.", lang),
-            chips=[T("धन्यवाद", "Dhanyabad", "Thanks", lang)])
+              f"✅ You're all settled up — Rs {settled:,.0f} has been paid, nothing is pending.", msg.lang),
+            chips=[T("धन्यवाद", "Dhanyabad", "Thanks", msg.lang)])
     return _resp(
         T("✅ अहिले तपाईंको कुनै भुक्तानी बाँकी छैन।",
           "✅ Ahile tapaaiko kunai bhuktani baaki chhaina.",
-          "✅ You have no pending payments right now.", lang),
-        chips=[T("बेच्न सुरु गर्ने", "Bechna suru garne", "Start selling", lang)])
+          "✅ You have no pending payments right now.", msg.lang),
+        chips=[T("बेच्न सुरु गर्ने", "Bechna suru garne", "Start selling", msg.lang)])
 
 
-def _order(_t, lang, _c, _ctx, _db, farmer, _conf):
-    if not farmer:
+def _order(msg):
+    if not msg.farmer:
         return _resp(
             T("अर्डर हेर्न लगइन गर्नुहोस्।", "Order herna login garnuhos.",
-              "Log in to see your orders.", lang))
+              "Log in to see your orders.", msg.lang))
     return _resp(
         T("📦 तपाईंका अर्डरहरू बेच्ने/किन्ने ट्याबमा देखिन्छन्।",
           "📦 Tapaaika orderharu bechne/kinne tab ma dekhinchhan.",
-          "📦 Your orders appear in the Sell/Buy tabs.", lang))
+          "📦 Your orders appear in the Sell/Buy tabs.", msg.lang))
 
 
-def _scan(_t, lang, _c, _ctx, _db, _farmer, _conf):
+def _scan(msg):
     return _resp(
         T("📷 सल्लाह ट्याबमा 'फोटोबाट जाँच्नुहोस्' थिच्नुहोस् — माटोको फोटो र दुई प्रश्नबाट जग्गाको किसिम थाहा पाइन्छ।",
           "📷 Sallah tab ma 'photo bata janchnuhos' thichnuhos — matoko photo ra dui prashna bata jaggako kism thaha painchha.",
-          "📷 In the Advice tab tap 'Scan by photo' — it estimates your land type from a soil photo and two questions.", lang))
+          "📷 In the Advice tab tap 'Scan by photo' — it estimates your land type from a soil photo and two questions.", msg.lang))
 
 
-def _agronomy(text, lang, crops, _ctx, _db, _farmer, _conf):
+def _agronomy(msg):
     """Pest/disease/fertilizer/sowing advice from the curated knowledge base."""
-    lower = text.lower()
+    lower = msg.text.lower()
     is_pest = any(w in lower for w in
                   ["रोग", "कीरा", "डढुवा", "कुहिने", "disease", "pest", "blight",
                    "rog", "keera", "kira", "khumre", "lahi", "उपचार"])
     # map assistant crop codes to ai_advisor keys (same lowercase names)
     agro = None
-    if crops:
-        agro = _AGRO.get(crops[0])
-    if not agro and crops:
+    if msg.crops:
+        agro = _AGRO.get(msg.crops[0])
+    if not agro and msg.crops:
         # try matching by nepali/english name
         for key, info in _AGRO.items():
-            ne, en, _al, _ic = CROPS.get(crops[0], ("", "", [], ""))
+            ne, en, _al, _ic = CROPS.get(msg.crops[0], ("", "", [], ""))
             if info.get("ne") == ne or info.get("en", "").lower() == en.lower():
                 agro = info
                 break
@@ -639,55 +658,55 @@ def _agronomy(text, lang, crops, _ctx, _db, _farmer, _conf):
             pests = "\n".join(f"• {v}" for v in agro.get("pests", {}).values())
             body = T(f"🌿 {ne_name} का मुख्य रोग र उपचार:\n\n{pests}\n\n💡 रासायनिक विषादीभन्दा पहिले नीमको तेल वा ट्राइकोडर्मा जस्ता जैविक उपाय अपनाउनुहोस्।",
                      f"🌿 {agro.get('en','')} pest/disease remedies:\n\n{pests}",
-                     f"🌿 {agro.get('en','')} pest/disease remedies:\n\n{pests}", lang)
+                     f"🌿 {agro.get('en','')} pest/disease remedies:\n\n{pests}", msg.lang)
         else:
             fert = agro.get("fertilizer", "")
             sow = agro.get("sow", "")
             body = T(f"🌱 {ne_name}:\n\nमलखाद: {fert}\n\nरोप्ने समय: {sow}",
                      f"🌱 {agro.get('en','')}:\n\nFertilizer: {fert}\n\nSowing: {sow}",
-                     f"🌱 {agro.get('en','')}:\n\nFertilizer: {fert}\n\nSowing: {sow}", lang)
+                     f"🌱 {agro.get('en','')}:\n\nFertilizer: {fert}\n\nSowing: {sow}", msg.lang)
         return _resp(body, chips=[
-            T("अर्को बाली", "Arko bali", "Another crop", lang),
-            T("आजको भाउ", "Aajako bhau", "Today's rates", lang)])
+            T("अर्को बाली", "Arko bali", "Another crop", msg.lang),
+            T("आजको भाउ", "Aajako bhau", "Today's rates", msg.lang)])
     # no crop identified — ask which one
     return _resp(
         T("कुन बालीमा समस्या छ? जस्तै: गोलभेँडामा डढुवा, काउलीमा लाही कीरा।",
           "Kun balima samasya chha? Jastai: golbhedama dadhua, kaulima lahi kira.",
-          "Which crop has the problem? For example: tomato blight, cauliflower aphids.", lang),
-        chips=[T("गोलभेँडा", "Golbheda", "Tomato", lang),
-               T("काउली", "Kauli", "Cauliflower", lang),
-               T("आलु", "Aalu", "Potato", lang)])
+          "Which crop has the problem? For example: tomato blight, cauliflower aphids.", msg.lang),
+        chips=[T("गोलभेँडा", "Golbheda", "Tomato", msg.lang),
+               T("काउली", "Kauli", "Cauliflower", msg.lang),
+               T("आलु", "Aalu", "Potato", msg.lang)])
 
 
-def _thanks(_t, lang, _c, _ctx, _db, _farmer, _conf):
+def _thanks(msg):
     return _resp(
         T("खुसी लाग्यो! 🙏 अरू केही सोध्नु छ?",
           "Khusi lagyo! 🙏 Aru kehi sodhnu chha?",
-          "Glad to help! 🙏 Anything else?", lang),
-        chips=_default_chips(lang))
+          "Glad to help! 🙏 Anything else?", msg.lang),
+        chips=_default_chips(msg.lang))
 
 
-def _bye(_t, lang, _c, _ctx, _db, _farmer, _conf):
+def _bye(msg):
     return _resp(
         T("फेरि भेटौंला! 👋 राम्रो खेती होस्।",
           "Feri bhetnla! 👋 Ramro kheti hos.",
-          "See you again! 👋 Happy farming.", lang))
+          "See you again! 👋 Happy farming.", msg.lang))
 
 
-def _help(_t, lang, _c, _ctx, _db, _farmer, _conf):
+def _help(msg):
     return _resp(
         T("म यी कुरामा मद्दत गर्न सक्छु:\n💰 बालीको भाउ\n🌤️ मौसम\n🧺 कसरी बेच्ने\n🌱 के लगाउने\n📒 तपाईंको हिसाब\nतल थिच्नुहोस् वा आफ्नै शब्दमा सोध्नुहोस्।",
           "Ma yi kurama maddat garna sakchhu:\n💰 Baliko bhau\n🌤️ Mausam\n🧺 Kasari bechne\n🌱 Ke lagaune\n📒 Tapaaiko hisab\nTal thichnuhos wa aafnai shabdama sodhnuhos.",
-          "I can help with:\n💰 Crop prices\n🌤️ Weather\n🧺 How to sell\n🌱 What to plant\n📒 Your ledger\nTap below or ask in your own words.", lang),
-        chips=_default_chips(lang))
+          "I can help with:\n💰 Crop prices\n🌤️ Weather\n🧺 How to sell\n🌱 What to plant\n📒 Your ledger\nTap below or ask in your own words.", msg.lang),
+        chips=_default_chips(msg.lang))
 
 
-def _fallback(_t, lang, _c, _ctx, _db, _farmer, conf):
+def _fallback(msg):
     return _resp(
         T("मैले ठ्याक्कै बुझिनँ। भाउ, मौसम, बेच्ने, के लगाउने वा हिसाबबारे सोध्नुहोस् — वा सहकारीलाई सिधै फोन गर्नुहोस्।",
           "Maile thyakkai bujhina. Bhau, mausam, bechne, ke lagaune wa hisab baare sodhnuhos — wa sahakarilai sidhai phone garnuhos.",
-          "I didn't quite get that. Ask about prices, weather, selling, planting or your ledger — or call your co-op directly.", lang),
-        chips=_default_chips(lang))
+          "I didn't quite get that. Ask about prices, weather, selling, planting or your ledger — or call your co-op directly.", msg.lang),
+        chips=_default_chips(msg.lang))
 
 
 _HANDLERS = {
