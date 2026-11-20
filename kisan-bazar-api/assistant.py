@@ -649,7 +649,12 @@ def _agronomy(msg):
         # try matching by nepali/english name
         for key, info in _AGRO.items():
             ne, en, _al, _ic = CROPS.get(msg.crops[0], ("", "", [], ""))
-            if info.get("ne") == ne or info.get("en", "").lower() == en.lower():
+            # Guard on non-empty names: with an unknown crop code the
+            # lookup above yields ("", ""), and an _AGRO entry missing
+            # "en" would otherwise match vacuously ("" == "") and
+            # answer with an empty crop name and empty advice instead
+            # of the "which crop?" prompt below.
+            if (ne and info.get("ne") == ne) or (en and info.get("en", "").lower() == en.lower()):
                 agro = info
                 break
     if agro:
