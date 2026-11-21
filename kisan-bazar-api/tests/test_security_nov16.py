@@ -95,12 +95,23 @@ def run():
     passed += 1
 
     print("\n=== 6. Wrong types are 400s, not 500s (rental booking) ===")
+    # The booking date is relative to TODAY in Nepal time: the
+    # endpoint rejects past dates, so a hardcoded date went stale
+    # the day after it was written (same class as the Oct-23
+    # rentals block). Book tomorrow; the geometry is unchanged.
+    from datetime import datetime, timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        tomorrow = (datetime.now(ZoneInfo("Asia/Kathmandu"))
+                    + timedelta(days=1)).date().isoformat()
+    except Exception:
+        tomorrow = (datetime.now() + timedelta(days=1)).date().isoformat()
     r = client.post("/v1/rentals/1/book",
-                    json={"days": 2, "book_date": ["2026-11-20"]},
+                    json={"days": 2, "book_date": [tomorrow]},
                     headers=fh, environ_base={"REMOTE_ADDR": IP_C})
     assert r.status_code == 400, (r.status_code, r.get_json())
     r = client.post("/v1/rentals/1/book",
-                    json={"days": 2, "book_date": "2026-11-20"},
+                    json={"days": 2, "book_date": tomorrow},
                     headers=fh, environ_base={"REMOTE_ADDR": IP_C})
     assert r.status_code == 201, r.get_json()
     print("  PASS — list book_date 400; valid booking 201")

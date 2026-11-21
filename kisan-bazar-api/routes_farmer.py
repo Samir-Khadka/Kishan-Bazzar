@@ -25,11 +25,17 @@ def save_land_scan(phone):
     bucket, texture answer, drainage answer) and the resulting land type,
     so this endpoint carries no image data or privacy/storage burden."""
     body = json_body()
-    if "land_type" not in body or "confidence" not in body:
+    # str_field, not a bare `in` on the set: a JSON list/dict for
+    # land_type or confidence reached the set-membership test and
+    # 500'd (TypeError: unhashable type) — wrong type is a 400,
+    # never a 500, on this authenticated write path.
+    land_type = str_field(body.get("land_type"))
+    confidence = str_field(body.get("confidence"))
+    if land_type is None or confidence is None:
         return jsonify({"error": "land_type and confidence are required"}), 400
-    if body["land_type"] not in VALID_LAND_TYPES:
+    if land_type not in VALID_LAND_TYPES:
         return jsonify({"error": f"land_type must be one of {sorted(VALID_LAND_TYPES)}"}), 400
-    if body["confidence"] not in VALID_CONFIDENCE:
+    if confidence not in VALID_CONFIDENCE:
         return jsonify({"error": f"confidence must be one of {sorted(VALID_CONFIDENCE)}"}), 400
     # The derived signals are free-form client strings — bound them so
     # an authenticated caller can't bloat the table with unbounded text.
@@ -51,12 +57,12 @@ def save_land_scan(phone):
     cur = conn.execute(
         "INSERT INTO land_scans (farmer_phone, land_type, confidence, color_key, texture, drainage, had_photo) "
         "VALUES (?,?,?,?,?,?,?)",
-        (phone, body["land_type"], body["confidence"],
+        (phone, land_type, confidence,
          body.get("color_key"), body.get("texture"), body.get("drainage"),
          1 if body.get("had_photo") else 0),
     )
     scan_id = cur.lastrowid
-    conn.execute("UPDATE farmers SET land_type=? WHERE phone=?", (body["land_type"], phone))
+    conn.execute("UPDATE farmers SET land_type=? WHERE phone=?", (land_type, phone))
     conn.commit()
     row = repositories.get_land_scan(conn, scan_id)
     conn.close()
@@ -141,7 +147,12 @@ def crop_doctor_diagnose():
     # The diagnosis is written to the AUTHENTICATED farmer's history.
     # This endpoint used to accept any farmer_phone in the body with
     # no login at all — anyone could poison anyone else's history.
-    claimed = (body.get("farmer_phone") or "").strip()
+    # str_field, not (body.get(...) or "").strip(): a JSON list/dict/
+    # number for farmer_phone 500'd on .strip() — wrong type is a 400.
+    raw_claimed = body.get("farmer_phone")
+    if raw_claimed is not None and not isinstance(raw_claimed, str):
+        return jsonify({"error": "farmer_phone must be a string"}), 400
+    claimed = (raw_claimed or "").strip()
     if claimed and claimed != g.phone:
         return jsonify({"error": "you can only do this for your own phone number"}), 403
     farmer_phone = g.phone

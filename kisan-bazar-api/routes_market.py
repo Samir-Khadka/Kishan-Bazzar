@@ -432,7 +432,14 @@ def decide_offer(offer_id):
         offer = repositories.get_offer(conn, offer_id)
         if not offer:
             return reject(conn, "offer not found", 404)
-        if offer["status"] != "pending" and not (offer["status"] == "countered" and decision in ("accepted", "rejected")):
+        # A countered offer may be accepted, rejected — or countered
+        # AGAIN. The old guard allowed only accepted/rejected from
+        # 'countered', so a staff member who mistyped a counter rate
+        # had no way to correct it: the only exits were accepting at
+        # the wrong rate (a money error) or rejecting and making the
+        # buyer re-bid. Re-countering just overwrites the rate below;
+        # converted/rejected stay terminal.
+        if offer["status"] != "pending" and not (offer["status"] == "countered" and decision in ("accepted", "rejected", "countered")):
             return reject(conn, f"offer is '{offer['status']}', cannot decide", 409)
 
         if decision == "countered":
