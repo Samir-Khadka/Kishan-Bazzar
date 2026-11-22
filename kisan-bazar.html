@@ -1096,7 +1096,12 @@ function header(){
   const authBtn = $("authBtn");
   if(authBtn){
     if(account.token){
-      const namePart = account.name ? account.name.split(" ")[0] : (account.phone ? account.phone.slice(-4) : "User");
+      // account.name/phone come from localStorage and may not be strings
+      // (a value an older build wrote, or a hand-edited key) — .split()
+      // on a number threw inside header() and blanked the app on load.
+      const nameStr = typeof account.name === "string" ? account.name : "";
+      const phoneStr = typeof account.phone === "string" ? account.phone : "";
+      const namePart = nameStr ? nameStr.split(" ")[0] : (phoneStr ? phoneStr.slice(-4) : "User");
       authBtn.innerHTML = `👤 ${esc(namePart)}`;
       authBtn.style.background = "var(--paddy)";
       authBtn.style.color = "#fff";
@@ -3325,7 +3330,22 @@ const VIEWS = {today:viewToday, sell:viewSell, advice:viewAdvice, doctor:viewDoc
 function render(opts){
   opts = opts || {};
   document.documentElement.lang = L==="ne" ? "ne" : "en";
+  // Persisted state comes from localStorage, which can hold values an
+  // older build wrote (or a hand-edited key) that no longer match the
+  // app's tables. An unknown role/zone used to throw inside render() /
+  // viewToday() and blank the whole app on every load, with no recovery
+  // inside the app — fall back to defaults instead, and let save() below
+  // persist the repair (same "corrupt data must not blank the app" rule
+  // as offerRow/viewCart). Non-object offers entries are dropped: the
+  // .filter(o=>o.status...) sites in viewToday/viewMine/assistantReply
+  // read .status unguarded, so one null row blanked the ledger.
+  if(!TABS[S.role]) S.role = "farmer";
   if(!TABS[S.role].some(t=>t[0]===S.tab)) S.tab = TABS[S.role][0][0];
+  if(!WEATHER[S.zone]) S.zone = "midhill";
+  if(!LANDS.some(l=>l.id===S.land)) S.land = "bari";
+  if(!Array.isArray(S.offers)) S.offers = [];
+  else S.offers = S.offers.filter(o=>o && typeof o === "object");
+  if(!S.cart || typeof S.cart !== "object" || Array.isArray(S.cart)) S.cart = {};
   header(); nav();
   $("main").innerHTML = (VIEWS[S.tab]||viewToday)();
   $("sahayakRoot").innerHTML = renderSahayak() + renderOfferDialog();
